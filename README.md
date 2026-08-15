@@ -24,7 +24,7 @@ coldBuildTimeoutSeconds = 300
 workerThreads = 4
 ```
 
-A finite timeout must be 60–1800 seconds; `0` is explicitly unlimited. A timeout fails the reload and never silently falls back to stale structure data. The Watermelon Field torture pack needs a private override of 360 seconds; ordinary packs retain the 300-second default.
+A finite timeout must be 60–1800 seconds; `0` is explicitly unlimited. A timeout fails the reload and never silently falls back to stale structure data. The Watermelon Field torture pack needs a private override of 420 seconds after a reproducible clean build reached 355.812 seconds; ordinary packs retain the 300-second default.
 
 ## Current private evidence
 
