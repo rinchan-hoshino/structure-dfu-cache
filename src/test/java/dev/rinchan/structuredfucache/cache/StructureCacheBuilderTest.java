@@ -64,6 +64,7 @@ class StructureCacheBuilderTest {
         Path changedBlob = changed.convertedResources().get(LOCATION);
         assertNotEquals(firstBlob, changedBlob);
         assertTrue(Files.isRegularFile(changedBlob));
+        assertFalse(Files.exists(firstBlob));
         assertEquals(1, changed.stats().converted());
     }
 

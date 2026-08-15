@@ -238,6 +238,7 @@ public final class StructureCacheBuilder {
         } catch (IOException exception) {
             throw new CacheBuildException("Cannot commit complete structure DFU cache index", exception);
         }
+        pruneUnreferencedBlobs(index);
         long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
         CacheBuildStats stats = new CacheBuildStats(
             total,
@@ -248,6 +249,34 @@ public final class StructureCacheBuilder {
             slowest == null ? "" : slowest.location().toString()
         );
         return new CacheSnapshot(targetDataVersion, convertedResources, stats);
+    }
+
+    private void pruneUnreferencedBlobs(CacheIndex index) {
+        Path blobRoot = cacheRoot.resolve("blobs").normalize();
+        if (!Files.isDirectory(blobRoot)) {
+            return;
+        }
+        var referenced = index.entries().values().stream()
+            .map(CacheEntry::blobPath)
+            .filter(path -> !path.isEmpty())
+            .map(this::resolveIndexedBlob)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        long removed = 0L;
+        try (var paths = Files.walk(blobRoot)) {
+            for (Path path : paths.filter(Files::isRegularFile).toList()) {
+                Path normalized = path.normalize();
+                if (!referenced.contains(normalized)) {
+                    Files.deleteIfExists(normalized);
+                    removed++;
+                }
+            }
+        } catch (IOException exception) {
+            LOGGER.warn("Unable to fully prune unreferenced structure DFU cache blobs: {}", exception.toString());
+            return;
+        }
+        if (removed > 0L) {
+            LOGGER.info("Pruned {} unreferenced structure DFU cache blobs", removed);
+        }
     }
 
     private Optional<CacheIndex> readPreviousIndex(int targetDataVersion) {
