@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletionService;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
@@ -79,9 +80,17 @@ public final class StructureCacheBuilder {
         ExecutorService workers = Executors.newFixedThreadPool(workerThreads, daemonThreadFactory());
         CompletionService<ResourceResult> completion = new ExecutorCompletionService<>(workers);
         Semaphore conversionMemory = new Semaphore(workerThreads, true);
+        Map<Path, Object> blobLocks = new ConcurrentHashMap<>();
         List<Future<ResourceResult>> futures = new ArrayList<>(resources.size());
         for (Map.Entry<ResourceLocation, Resource> resource : resources) {
-            futures.add(completion.submit(() -> process(resource, previous, targetDataVersion, deadlineNanos, conversionMemory)));
+            futures.add(completion.submit(() -> process(
+                resource,
+                previous,
+                targetDataVersion,
+                deadlineNanos,
+                conversionMemory,
+                blobLocks
+            )));
         }
 
         List<ResourceResult> results = new ArrayList<>(resources.size());
@@ -127,7 +136,8 @@ public final class StructureCacheBuilder {
         CacheIndex previous,
         int targetDataVersion,
         long deadlineNanos,
-        Semaphore conversionMemory
+        Semaphore conversionMemory,
+        Map<Path, Object> blobLocks
     ) {
         long started = System.nanoTime();
         ResourceLocation location = listedResource.getKey();
@@ -151,54 +161,70 @@ public final class StructureCacheBuilder {
         }
 
         Path blob = blobPath(key);
-        if (Files.isRegularFile(blob)) {
-            return ResourceResult.converted(location, key, blob, elapsedSince(started), true);
-        }
+        Object blobLock = blobLocks.computeIfAbsent(blob, ignored -> new Object());
+        synchronized (blobLock) {
+            if (Files.isRegularFile(blob)) {
+                return ResourceResult.converted(location, key, blob, elapsedSince(started), true);
+            }
 
+            return convertBlob(bytes, key, blob, location, started, deadlineNanos, conversionMemory);
+        }
+    }
+
+    private ResourceResult convertBlob(
+        byte[] bytes,
+        CacheKey key,
+        Path blob,
+        ResourceLocation location,
+        long started,
+        long deadlineNanos,
+        Semaphore conversionMemory
+    ) {
         int conversionPermits = permitWeight(bytes.length, workerThreads);
         acquirePermits(conversionMemory, conversionPermits, deadlineNanos, location);
         try {
-        CompoundTag original;
-        try {
-            original = NbtIo.readCompressed(new ByteArrayInputStream(bytes), NbtAccounter.unlimitedHeap());
-        } catch (IOException | RuntimeException exception) {
-            LOGGER.warn("Skipping unreadable non-template structure resource {}: {}", location, exception.toString());
-            return ResourceResult.skipped(location, elapsedSince(started));
-        }
-        if (!isStructureTemplate(original)) {
-            LOGGER.debug("Skipping non-template resource under structure path {}", location);
-            return ResourceResult.skipped(location, elapsedSince(started));
-        }
+            CompoundTag original;
+            try {
+                original = NbtIo.readCompressed(new ByteArrayInputStream(bytes), NbtAccounter.unlimitedHeap());
+            } catch (IOException | RuntimeException exception) {
+                LOGGER.warn("Skipping unreadable non-template structure resource {}: {}", location, exception.toString());
+                return ResourceResult.skipped(location, elapsedSince(started));
+            }
+            if (!isStructureTemplate(original)) {
+                LOGGER.debug("Skipping non-template resource under structure path {}", location);
+                return ResourceResult.skipped(location, elapsedSince(started));
+            }
 
-        int sourceDataVersion = NbtUtils.getDataVersion(original, 500);
-        if (sourceDataVersion >= targetDataVersion) {
-            return ResourceResult.current(location, key, elapsedSince(started), false);
-        }
+            int sourceDataVersion = NbtUtils.getDataVersion(original, 500);
+            if (sourceDataVersion >= key.targetDataVersion()) {
+                return ResourceResult.current(location, key, elapsedSince(started), false);
+            }
 
-        checkDeadline(deadlineNanos, location);
-        StructureFingerprint before = StructureFingerprint.capture(original);
-        CompoundTag updated;
-        try {
-            updated = DataFixTypes.STRUCTURE.updateToCurrentVersion(dataFixer, original, sourceDataVersion);
-        } catch (RuntimeException exception) {
-            throw new CacheBuildException("Official DFU failed for structure " + location, exception);
-        }
-        NbtUtils.addCurrentDataVersion(updated);
-        checkDeadline(deadlineNanos, location);
-        StructureFingerprint after = StructureFingerprint.capture(updated);
-        if (!before.equals(after)) {
-            throw new CacheBuildException(
-                "Official DFU changed structure geometry for " + location + ": " + before + " -> " + after
-            );
-        }
-        int outputDataVersion = NbtUtils.getDataVersion(updated, -1);
-        if (outputDataVersion != targetDataVersion) {
-            throw new CacheBuildException(
-                "Official DFU produced DataVersion " + outputDataVersion + " for " + location + ", expected " + targetDataVersion
-            );
-        }
-        writeBlobAtomic(blob, updated);
-        return ResourceResult.converted(location, key, blob, elapsedSince(started), false);
+            checkDeadline(deadlineNanos, location);
+            StructureFingerprint before = StructureFingerprint.capture(original);
+            CompoundTag updated;
+            try {
+                updated = DataFixTypes.STRUCTURE.updateToCurrentVersion(dataFixer, original, sourceDataVersion);
+            } catch (RuntimeException exception) {
+                throw new CacheBuildException("Official DFU failed for structure " + location, exception);
+            }
+            NbtUtils.addCurrentDataVersion(updated);
+            checkDeadline(deadlineNanos, location);
+            StructureFingerprint after = StructureFingerprint.capture(updated);
+            if (!before.equals(after)) {
+                throw new CacheBuildException(
+                    "Official DFU changed structure geometry for " + location + ": " + before + " -> " + after
+                );
+            }
+            int outputDataVersion = NbtUtils.getDataVersion(updated, -1);
+            if (outputDataVersion != key.targetDataVersion()) {
+                throw new CacheBuildException(
+                    "Official DFU produced DataVersion " + outputDataVersion + " for " + location
+                        + ", expected " + key.targetDataVersion()
+                );
+            }
+            writeBlobAtomic(blob, updated);
+            return ResourceResult.converted(location, key, blob, elapsedSince(started), false);
         } finally {
             conversionMemory.release(conversionPermits);
         }

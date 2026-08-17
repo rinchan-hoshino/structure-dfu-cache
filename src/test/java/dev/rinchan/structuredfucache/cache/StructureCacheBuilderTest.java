@@ -34,6 +34,7 @@ import org.junit.jupiter.api.io.TempDir;
 class StructureCacheBuilderTest {
     private static final int TARGET_DATA_VERSION = 3955;
     private static final ResourceLocation LOCATION = ResourceLocation.fromNamespaceAndPath("example", "structure/old.nbt");
+    private static final ResourceLocation DUPLICATE_LOCATION = ResourceLocation.fromNamespaceAndPath("example", "structure/duplicate.nbt");
 
     @TempDir
     Path temporaryDirectory;
@@ -66,6 +67,22 @@ class StructureCacheBuilderTest {
         assertTrue(Files.isRegularFile(changedBlob));
         assertFalse(Files.exists(firstBlob));
         assertEquals(1, changed.stats().converted());
+    }
+
+    @Test
+    void duplicateContentIsConvertedOnceAndSharedAcrossWorkers() {
+        byte[] duplicate = compressedStructure("shared");
+        StructureCacheBuilder builder = builder(new CachePolicy(Duration.ofMinutes(5)));
+
+        CacheSnapshot snapshot = builder.build(
+            manager(Map.of(LOCATION, duplicate, DUPLICATE_LOCATION, duplicate)),
+            TARGET_DATA_VERSION
+        );
+
+        assertEquals(1, snapshot.stats().converted());
+        assertEquals(1, snapshot.stats().cacheHits());
+        assertEquals(snapshot.convertedResources().get(LOCATION), snapshot.convertedResources().get(DUPLICATE_LOCATION));
+        assertTrue(Files.isRegularFile(snapshot.convertedResources().get(LOCATION)));
     }
 
     @Test
@@ -155,6 +172,54 @@ class StructureCacheBuilderTest {
             @Override
             public Map<ResourceLocation, List<Resource>> listResourceStacks(String path, java.util.function.Predicate<ResourceLocation> filter) {
                 return path.equals("structure") && filter.test(LOCATION) ? Map.of(LOCATION, List.of(resource)) : Map.of();
+            }
+
+            @Override
+            public Stream<PackResources> listPacks() {
+                return Stream.of(packResources());
+            }
+        };
+    }
+
+    private static ResourceManager manager(Map<ResourceLocation, byte[]> resources) {
+        Map<ResourceLocation, Resource> resolved = resources.entrySet().stream().collect(
+            java.util.stream.Collectors.toUnmodifiableMap(
+                Map.Entry::getKey,
+                entry -> new Resource(packResources(), () -> new ByteArrayInputStream(entry.getValue()))
+            )
+        );
+        return new ResourceManager() {
+            @Override
+            public Set<String> getNamespaces() {
+                return Set.of("example");
+            }
+
+            @Override
+            public Optional<Resource> getResource(ResourceLocation location) {
+                return Optional.ofNullable(resolved.get(location));
+            }
+
+            @Override
+            public List<Resource> getResourceStack(ResourceLocation location) {
+                Resource resource = resolved.get(location);
+                return resource == null ? List.of() : List.of(resource);
+            }
+
+            @Override
+            public Map<ResourceLocation, Resource> listResources(String path, java.util.function.Predicate<ResourceLocation> filter) {
+                if (!path.equals("structure")) {
+                    return Map.of();
+                }
+                return resolved.entrySet().stream()
+                    .filter(entry -> filter.test(entry.getKey()))
+                    .collect(java.util.stream.Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
+            }
+
+            @Override
+            public Map<ResourceLocation, List<Resource>> listResourceStacks(String path, java.util.function.Predicate<ResourceLocation> filter) {
+                return listResources(path, filter).entrySet().stream().collect(
+                    java.util.stream.Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> List.of(entry.getValue()))
+                );
             }
 
             @Override
