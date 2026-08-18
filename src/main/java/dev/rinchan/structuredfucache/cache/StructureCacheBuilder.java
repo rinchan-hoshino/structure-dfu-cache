@@ -47,6 +47,7 @@ public final class StructureCacheBuilder {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final String STRUCTURE_PREFIX = "structure";
     private static final String STRUCTURE_SUFFIX = ".nbt";
+    private static final long MAX_STRUCTURE_NBT_HEAP_BYTES = 256L * 1024L * 1024L;
 
     private final DataFixer dataFixer;
     private final Path cacheRoot;
@@ -185,7 +186,7 @@ public final class StructureCacheBuilder {
         try {
             CompoundTag original;
             try {
-                original = NbtIo.readCompressed(new ByteArrayInputStream(bytes), NbtAccounter.unlimitedHeap());
+                original = readCompressed(bytes, MAX_STRUCTURE_NBT_HEAP_BYTES);
             } catch (IOException | RuntimeException exception) {
                 LOGGER.warn("Skipping unreadable non-template structure resource {}: {}", location, exception.toString());
                 return ResourceResult.skipped(location, elapsedSince(started));
@@ -325,6 +326,13 @@ public final class StructureCacheBuilder {
             throw new CacheBuildException("Cache index escaped cache root: " + blobPath);
         }
         return resolved;
+    }
+
+    static CompoundTag readCompressed(byte[] bytes, long maxHeapBytes) throws IOException {
+        if (maxHeapBytes < 1L) {
+            throw new IllegalArgumentException("maxHeapBytes must be positive");
+        }
+        return NbtIo.readCompressed(new ByteArrayInputStream(bytes), NbtAccounter.create(maxHeapBytes));
     }
 
     private static boolean isStructureTemplate(CompoundTag tag) {

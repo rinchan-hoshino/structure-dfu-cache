@@ -86,6 +86,19 @@ class StructureCacheBuilderTest {
     }
 
     @Test
+    void boundedReaderRejectsNbtThatExpandsBeyondItsMemoryBudget() throws Exception {
+        CompoundTag oversized = new CompoundTag();
+        oversized.putByteArray("payload", new byte[2 * 1024 * 1024]);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        net.minecraft.nbt.NbtIo.writeCompressed(oversized, output);
+
+        assertThrows(
+            RuntimeException.class,
+            () -> StructureCacheBuilder.readCompressed(output.toByteArray(), 1024L)
+        );
+    }
+
+    @Test
     void timeoutDoesNotCommitPartialIndex() {
         AtomicInteger opens = new AtomicInteger();
         ResourceManager manager = manager(() -> {

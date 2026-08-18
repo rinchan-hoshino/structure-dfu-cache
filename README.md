@@ -5,6 +5,7 @@ Private Minecraft 1.21.1 / NeoForge 21.1.248 incubation project. It does not bun
 ## Behavior
 
 - Resolves the effective `data/<namespace>/structure/*.nbt` resources after pack priority is applied.
+- Bounds each compressed NBT parse to 256 MiB of accounted heap so malformed or oversized non-template resources cannot exhaust the server heap.
 - Hashes the compressed source bytes with SHA-256 and keys cache blobs by source hash plus target Minecraft `DataVersion`.
 - Converts stale templates with Mojang's `DataFixTypes.STRUCTURE` and writes the current `DataVersion`.
 - Rejects a conversion if template size, block count, entity count, or palette count changes.
@@ -24,10 +25,11 @@ coldBuildTimeoutSeconds = 300
 workerThreads = 4
 ```
 
-A finite timeout must be 60–1800 seconds; `0` is explicitly unlimited. A timeout fails the reload and never silently falls back to stale structure data. The Watermelon Field torture pack needs a private override of 900 seconds: RainYun reached 11,739/15,510 resources at the former 420-second bound, while ordinary packs retain the 300-second default.
+A finite timeout must be 60–1800 seconds; `0` is explicitly unlimited. A timeout fails the reload and never silently falls back to stale structure data. The Watermelon Field torture pack uses the 1800-second ceiling for 18,914 resolved resources, while ordinary packs retain the 300-second default.
 
 ## Current private evidence
 
+- RainYun WMF cold-cache validation with `0.1.0-private.3`: malformed/oversized resources were bounded and skipped, all 18,914 resources committed, the warm verification scan completed, and the full dedicated server reached `Done (906.666s)`.
 - Unit tests: content-addressed keying, official DFU conversion, structural invariants, warm hits, source-byte invalidation, atomic index writes, timeout fail-closed behavior, and weighted conversion memory limits.
 - Clean NeoForge headless startup: classloading, both mixins, cache listener, and server startup reached `Done` without bundled third-party assets.
 - Watermelon Field dev.52 clone with Paxi and the 72.94 MB generated datapack removed:
