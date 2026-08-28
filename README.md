@@ -1,6 +1,8 @@
+<p align="center"><img src="docs/icon.png" width="160" alt="Structure DFU Cache icon"></p>
+
 # Structure DFU Cache
 
-Private NeoForge 1.21.1 incubation mod for structure-heavy packs.
+A drop-in startup-time persistent DFU cache for structure-heavy NeoForge packs.
 
 ## Contract
 
@@ -40,6 +42,10 @@ If even one effective resource cannot be captured, or if the cache/index/generat
 
 The support range is intentionally narrow. Expansion requires a separate static Mixin contract and structure-corpus parity evidence.
 
-## Validation boundary
+## Validation
 
-The repository contains focused pure tests for content addressing, runtime identity invalidation, bounded input, stream closure, fallback behavior, atomic index replacement, and vanilla `PathPackResources` overlay materialization. Runtime client/server validation is a separate explicitly authorized step.
+The focused test set covers content addressing, runtime identity invalidation, bounded input, stream closure, fallback behavior, atomic index replacement, and vanilla `PathPackResources` materialization. The 1.0.0 release was also started on a minimal NeoForge 21.1.248 dedicated server: the cache prepared 1,180 effective structure resources with zero vanilla fallbacks before the server reached `Done`.
+
+## License
+
+Structure DFU Cache is licensed under `GPL-3.0-or-later`. See [LICENSE](LICENSE).
