@@ -5,6 +5,7 @@ public record CacheBuildStats(
     int converted,
     int current,
     int cacheHits,
+    int vanillaFallbacks,
     long elapsedMillis,
     String slowestResource
 ) {

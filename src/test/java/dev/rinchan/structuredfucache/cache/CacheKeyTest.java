@@ -2,24 +2,26 @@ package dev.rinchan.structuredfucache.cache;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
 class CacheKeyTest {
     @Test
-    void keyIncludesExactResourceBytesAndTargetDataVersion() {
+    void keyIncludesExactBytesAndRuntimeConversionIdentity() {
         byte[] bytes = "structure".getBytes(StandardCharsets.UTF_8);
+        CacheIdentity firstIdentity = new CacheIdentity(CacheIdentity.CURRENT_FORMAT, 3955, "1.21.1", "21.1.248");
+        CacheIdentity changedRuntime = new CacheIdentity(CacheIdentity.CURRENT_FORMAT, 3955, "1.21.1", "21.1.249");
 
-        CacheKey first = CacheKey.of(bytes, 3955);
-        CacheKey same = CacheKey.of(bytes, 3955);
-        CacheKey otherVersion = CacheKey.of(bytes, 3956);
+        CacheKey first = CacheKey.of(bytes, firstIdentity);
+        CacheKey same = CacheKey.of(bytes, firstIdentity);
+        CacheKey otherRuntime = CacheKey.of(bytes, changedRuntime);
 
         assertEquals(first, same);
-        assertNotEquals(first, otherVersion);
-        assertEquals(
-            "3955/52/520cdb563bf80b193aab6aad62781a9647c75dbf76748117299c7dac0ae63a87.nbt",
-            first.blobRelativePath().toString().replace('\\', '/')
-        );
+        assertNotEquals(first, otherRuntime);
+        assertTrue(first.convertedBlobRelativePath().startsWith("blobs/" + firstIdentity.pathSegment() + "/52/"));
+        assertTrue(first.convertedBlobRelativePath().endsWith(first.digest() + ".nbt"));
+        assertEquals("sources/52/" + first.digest() + ".nbt", first.sourceBlobRelativePath());
     }
 }

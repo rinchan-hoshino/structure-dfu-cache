@@ -25,11 +25,15 @@ public final class CacheIndexStore {
             return Optional.empty();
         }
         try (Reader reader = Files.newBufferedReader(indexPath, StandardCharsets.UTF_8)) {
-            CacheIndex index = GSON.fromJson(reader, CacheIndex.class);
-            if (index == null || index.formatVersion() != CacheIndex.CURRENT_FORMAT) {
+            try {
+                CacheIndex index = GSON.fromJson(reader, CacheIndex.class);
+                if (index == null || index.identity() == null || index.identity().formatVersion() != CacheIdentity.CURRENT_FORMAT) {
+                    return Optional.empty();
+                }
+                return Optional.of(index);
+            } catch (RuntimeException exception) {
                 return Optional.empty();
             }
-            return Optional.of(index);
         }
     }
 

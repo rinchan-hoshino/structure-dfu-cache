@@ -1,7 +1,7 @@
 package dev.rinchan.structuredfucache.cache;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,20 +14,26 @@ class CacheIndexStoreTest {
     Path temporaryDirectory;
 
     @Test
-    void atomicallyRoundTripsOnlyCompleteGeneration() throws Exception {
+    void roundTripsVersionedIndexAtomically() throws Exception {
+        Path indexPath = temporaryDirectory.resolve("index.json");
+        CacheIdentity identity = new CacheIdentity(CacheIdentity.CURRENT_FORMAT, 3955, "1.21.1", "21.1.248");
         CacheIndex expected = new CacheIndex(
-            CacheIndex.CURRENT_FORMAT,
-            3955,
-            Map.of(
-                "example:structure/old.nbt", new CacheEntry("abc", "3955/ab/abc.nbt"),
-                "example:structure/current.nbt", new CacheEntry("def", "")
-            )
+            identity,
+            Map.of("example:structure/test.nbt", new CacheEntry("a".repeat(64), "blobs/abc.nbt", true))
         );
-        Path index = temporaryDirectory.resolve("index.json");
 
-        CacheIndexStore.writeAtomic(index, expected);
+        CacheIndexStore.writeAtomic(indexPath, expected);
 
-        assertEquals(expected, CacheIndexStore.read(index).orElseThrow());
-        assertFalse(Files.exists(temporaryDirectory.resolve("index.json.tmp")));
+        assertEquals(expected, CacheIndexStore.read(indexPath).orElseThrow());
+        assertTrue(Files.isRegularFile(indexPath));
+        assertTrue(Files.notExists(indexPath.resolveSibling("index.json.tmp")));
+    }
+
+    @Test
+    void legacyIndexWithoutIdentityIsIgnored() throws Exception {
+        Path indexPath = temporaryDirectory.resolve("index.json");
+        Files.writeString(indexPath, "{\"formatVersion\":1,\"targetDataVersion\":3955,\"entries\":{}}");
+
+        assertTrue(CacheIndexStore.read(indexPath).isEmpty());
     }
 }
