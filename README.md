@@ -32,7 +32,7 @@ If even one effective resource cannot be captured, or if the cache/index/generat
 - conversion workers: selected automatically from available processors and maximum heap, reserving 2 GiB for Minecraft and then budgeting 1 GiB per worker, capped at four;
 - no wall-clock startup timeout;
 - cache identity includes cache format, target DataVersion, Minecraft version, and NeoForge version;
-- overlays are generation-scoped and atomically published; stale generations are removed during startup/reload maintenance.
+- overlays are generation-scoped and atomically published; superseded generations are retired during later `/reload` maintenance, while crash leftovers remain inert cache files.
 
 ## Supported runtime
 
