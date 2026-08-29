@@ -98,6 +98,7 @@ public final class StructureCacheBuilder {
                 result.location().toString(),
                 new CacheEntry(
                     result.key().digest(),
+                    blobDigest(result.preparedBlob()),
                     cacheRoot.relativize(result.preparedBlob()).toString().replace('\\', '/'),
                     result.kind() == ResultKind.CONVERTED
                 )
@@ -217,6 +218,14 @@ public final class StructureCacheBuilder {
         if (!Files.isRegularFile(indexedBlob)) {
             return null;
         }
+        try {
+            if (!previous.blobDigest().equals(CacheKey.sha256(indexedBlob))) {
+                Files.delete(indexedBlob);
+                return null;
+            }
+        } catch (IOException exception) {
+            throw new CacheBuildException("Cannot verify indexed structure cache blob " + indexedBlob, exception);
+        }
         return ResourceResult.prepared(
             location,
             key,
@@ -285,6 +294,14 @@ public final class StructureCacheBuilder {
         } catch (IOException | RuntimeException exception) {
             LOGGER.warn("Ignoring unreadable structure DFU cache index: {}", rootMessage(exception));
             return Optional.empty();
+        }
+    }
+
+    private static String blobDigest(Path blob) {
+        try {
+            return CacheKey.sha256(blob);
+        } catch (IOException exception) {
+            throw new CacheBuildException("Cannot hash prepared structure cache blob " + blob, exception);
         }
     }
 

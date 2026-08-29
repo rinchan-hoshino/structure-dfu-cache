@@ -3,7 +3,7 @@ package dev.rinchan.structuredfucache.cache;
 import java.nio.charset.StandardCharsets;
 
 public record CacheIdentity(int formatVersion, int targetDataVersion, String minecraftVersion, String neoForgeVersion) {
-    public static final int CURRENT_FORMAT = 2;
+    public static final int CURRENT_FORMAT = 3;
 
     public CacheIdentity {
         if (formatVersion != CURRENT_FORMAT) {

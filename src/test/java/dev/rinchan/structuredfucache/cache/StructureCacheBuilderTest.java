@@ -85,6 +85,54 @@ class StructureCacheBuilderTest {
     }
 
     @Test
+    void tamperedWarmBlobIsRejectedAndRebuilt() throws Exception {
+        byte[] original = compressedStructure("integrity");
+        StructureCacheBuilder builder = builder();
+        CacheSnapshot cold = builder.build(manager(original), IDENTITY);
+        Path blob = cold.preparedResources().get(LOCATION);
+        Files.write(blob, new byte[] {1, 2, 3});
+
+        CacheSnapshot rebuilt = builder.build(manager(original), IDENTITY);
+
+        assertEquals(0, rebuilt.stats().cacheHits());
+        assertEquals(1, rebuilt.stats().converted());
+        try (var input = Files.newInputStream(rebuilt.preparedResources().get(LOCATION))) {
+            CompoundTag actual = net.minecraft.nbt.NbtIo.readCompressed(input, net.minecraft.nbt.NbtAccounter.unlimitedHeap());
+            assertEquals("integrity", actual.getString("author"));
+            assertEquals(TARGET_DATA_VERSION, actual.getInt("DataVersion"));
+        }
+    }
+
+    @Test
+    void changedRuntimeIdentityCannotReusePreviousBlob() {
+        byte[] original = compressedStructure("identity");
+        CacheSnapshot first = builder().build(manager(original), IDENTITY);
+        CacheIdentity changed = new CacheIdentity(
+            CacheIdentity.CURRENT_FORMAT,
+            TARGET_DATA_VERSION,
+            "1.21.1",
+            "21.1.249"
+        );
+
+        CacheSnapshot rebuilt = builder().build(manager(original), changed);
+
+        assertEquals(0, rebuilt.stats().cacheHits());
+        assertEquals(1, rebuilt.stats().converted());
+        assertNotEquals(first.preparedResources().get(LOCATION), rebuilt.preparedResources().get(LOCATION));
+    }
+
+    @Test
+    void corruptIndexIsIgnoredAndReplaced() throws Exception {
+        Files.writeString(temporaryDirectory.resolve("index.json"), "not-json");
+
+        CacheSnapshot rebuilt = builder().build(manager(compressedStructure("index")), IDENTITY);
+
+        assertEquals(0, rebuilt.stats().cacheHits());
+        assertEquals(1, rebuilt.stats().converted());
+        assertTrue(CacheIndexStore.read(temporaryDirectory.resolve("index.json")).isPresent());
+    }
+
+    @Test
     void duplicateContentIsConvertedOnceAndSharedAcrossWorkers() {
         byte[] duplicate = compressedStructure("shared");
         CacheSnapshot snapshot = builder().build(

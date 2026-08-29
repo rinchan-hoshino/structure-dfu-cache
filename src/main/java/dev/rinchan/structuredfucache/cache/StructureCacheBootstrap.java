@@ -40,11 +40,18 @@ public final class StructureCacheBootstrap {
     }
 
     public static PreparedStructureResources prepare(ResourceManager original, DataFixer dataFixer) {
-        Path cacheRoot = cacheRoot();
+        return prepare(original, dataFixer, cacheRoot(), identity(), adaptiveWorkerThreads());
+    }
+
+    static PreparedStructureResources prepare(
+        ResourceManager original,
+        DataFixer dataFixer,
+        Path cacheRoot,
+        CacheIdentity identity,
+        int workers
+    ) {
         Path generation = null;
         try {
-            CacheIdentity identity = identity();
-            int workers = adaptiveWorkerThreads();
             CacheSnapshot snapshot = new StructureCacheBuilder(dataFixer, cacheRoot, workers).build(original, identity);
             CacheBuildStats stats = snapshot.stats();
             if (stats.totalResources() == 0 || stats.vanillaFallbacks() > 0

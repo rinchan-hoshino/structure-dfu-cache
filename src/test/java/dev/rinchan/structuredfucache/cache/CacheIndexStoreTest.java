@@ -19,7 +19,7 @@ class CacheIndexStoreTest {
         CacheIdentity identity = new CacheIdentity(CacheIdentity.CURRENT_FORMAT, 3955, "1.21.1", "21.1.248");
         CacheIndex expected = new CacheIndex(
             identity,
-            Map.of("example:structure/test.nbt", new CacheEntry("a".repeat(64), "blobs/abc.nbt", true))
+            Map.of("example:structure/test.nbt", new CacheEntry("a".repeat(64), "b".repeat(64), "blobs/abc.nbt", true))
         );
 
         CacheIndexStore.writeAtomic(indexPath, expected);
@@ -27,6 +27,17 @@ class CacheIndexStoreTest {
         assertEquals(expected, CacheIndexStore.read(indexPath).orElseThrow());
         assertTrue(Files.isRegularFile(indexPath));
         assertTrue(Files.notExists(indexPath.resolveSibling("index.json.tmp")));
+    }
+
+    @Test
+    void currentIndexWithoutBlobDigestIsIgnored() throws Exception {
+        Path indexPath = temporaryDirectory.resolve("index.json");
+        Files.writeString(indexPath, """
+            {"identity":{"formatVersion":3,"targetDataVersion":3955,"minecraftVersion":"1.21.1","neoForgeVersion":"21.1.248"},
+             "entries":{"example:structure/test.nbt":{"digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","blobPath":"blobs/abc.nbt","converted":true}}}
+            """);
+
+        assertTrue(CacheIndexStore.read(indexPath).isEmpty());
     }
 
     @Test

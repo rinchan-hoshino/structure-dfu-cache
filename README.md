@@ -44,7 +44,7 @@ The support range is intentionally narrow. Expansion requires a separate static 
 
 ## Validation
 
-The focused test set covers content addressing, runtime identity invalidation, bounded input, stream closure, fallback behavior, atomic index replacement, and vanilla `PathPackResources` materialization. The 1.0.0 release was also started on a minimal NeoForge 21.1.248 dedicated server: the cache prepared 1,180 effective structure resources with zero vanilla fallbacks before the server reached `Done`.
+The focused test set covers content addressing, runtime identity invalidation, cached-blob integrity, corrupt-index recovery, bounded input, stream closure, unavailable-cache fallback, atomic index replacement, and vanilla `PathPackResources` materialization. The 1.0.0 release was also started on a minimal NeoForge 21.1.248 dedicated server: the cache prepared 1,180 effective structure resources with zero vanilla fallbacks before the server reached `Done`.
 
 ## License
 

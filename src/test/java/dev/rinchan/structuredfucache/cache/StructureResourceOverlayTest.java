@@ -3,6 +3,8 @@ package dev.rinchan.structuredfucache.cache;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -17,6 +19,8 @@ import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.PathPackResources;
 import net.minecraft.server.packs.repository.PackSource;
 import net.minecraft.server.packs.resources.MultiPackResourceManager;
+import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.util.datafix.DataFixers;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -50,6 +54,25 @@ class StructureResourceOverlayTest {
 
         StructureCacheBootstrap.retireGeneration(generation);
         assertFalse(Files.exists(generation));
+    }
+
+    @Test
+    void unusableCacheRootFallsBackToTheOriginalResourceManager() throws Exception {
+        Path blockedRoot = temporaryDirectory.resolve("blocked-cache-root");
+        Files.writeString(blockedRoot, "not a directory");
+        ResourceManager original = new MultiPackResourceManager(PackType.SERVER_DATA, List.of());
+        CacheIdentity identity = new CacheIdentity(CacheIdentity.CURRENT_FORMAT, 3955, "1.21.1", "21.1.248");
+
+        StructureCacheBootstrap.PreparedStructureResources prepared = StructureCacheBootstrap.prepare(
+            original,
+            DataFixers.getDataFixer(),
+            blockedRoot,
+            identity,
+            1
+        );
+
+        assertSame(original, prepared.resourceManager());
+        assertNull(prepared.generationRoot());
     }
 
     @Test
