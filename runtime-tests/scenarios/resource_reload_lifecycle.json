@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "repository": "structure-dfu-cache",
+  "owner": "GameTest",
+  "status": "not_executed",
+  "reason": "Requires the real server resource-reload lifecycle, vanilla structure consumers, and executor shutdown observation.",
+  "scenarios": [
+    {
+      "id": "reload-publishes-one-complete-generation",
+      "preconditions": [
+        "Install a datapack containing one old valid structure, one current structure, and one intentionally unreadable structure resource.",
+        "Start with an empty cache root."
+      ],
+      "steps": [
+        "Run a server datapack reload and wait for the reload barrier.",
+        "Request all three structures through the real StructureTemplateManager.",
+        "Remove the unreadable fixture and run a second reload."
+      ],
+      "assertions": [
+        "The first reload keeps the original resource manager and publishes no partial index or overlay generation.",
+        "The second reload publishes exactly one complete generation before consumers resume.",
+        "Old and current structures decode through vanilla consumers with the target DataVersion policy."
+      ]
+    },
+    {
+      "id": "reload-and-stop-quiescence",
+      "preconditions": [
+        "Provide enough distinct old structures to keep all configured conversion workers busy."
+      ],
+      "steps": [
+        "Begin a reload, then supersede it with another reload at the supported lifecycle boundary.",
+        "Stop the server after the final reload barrier completes."
+      ],
+      "assertions": [
+        "Only the final generation remains active.",
+        "No worker reads a closed resource manager or writes after its generation is retired.",
+        "No non-daemon cache worker remains after stop."
+      ]
+    }
+  ]
+}

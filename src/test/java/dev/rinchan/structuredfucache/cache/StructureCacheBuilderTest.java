@@ -146,6 +146,26 @@ class StructureCacheBuilderTest {
     }
 
     @Test
+    void oneUnreadableResourcePreventsPartialIndexPublication() {
+        ResourceLocation brokenLocation = ResourceLocation.fromNamespaceAndPath("example", "structure/broken.nbt");
+        Map<ResourceLocation, Resource> resources = Map.of(
+            LOCATION,
+            resource(() -> new ByteArrayInputStream(compressedStructure("readable"))),
+            brokenLocation,
+            resource(() -> {
+                throw new IOException("negative fixture: resource stream cannot be opened");
+            })
+        );
+
+        CacheSnapshot snapshot = builder().build(managerFromResources(resources), IDENTITY);
+
+        assertEquals(1, snapshot.stats().vanillaFallbacks());
+        assertEquals(1, snapshot.preparedResources().size());
+        assertTrue(snapshot.preparedResources().containsKey(LOCATION));
+        assertFalse(Files.exists(temporaryDirectory.resolve("index.json")));
+    }
+
+    @Test
     void malformedResourceIsPreservedByteForByteInFlattenedPack() throws Exception {
         byte[] malformed = new byte[] {1, 2, 3};
         CacheSnapshot snapshot = builder().build(manager(malformed), IDENTITY);
@@ -238,6 +258,10 @@ class StructureCacheBuilderTest {
                 entry -> resource(() -> new ByteArrayInputStream(entry.getValue()))
             )
         );
+        return managerFromResources(resolved);
+    }
+
+    private static ResourceManager managerFromResources(Map<ResourceLocation, Resource> resolved) {
         return new ResourceManager() {
             @Override
             public Set<String> getNamespaces() {
