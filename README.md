@@ -1,8 +1,33 @@
-<p align="center"><img src="docs/icon.png" width="160" alt="Structure DFU Cache icon"></p>
-
 # Structure DFU Cache
 
-A drop-in startup-time persistent DFU cache for structure-heavy NeoForge packs.
+<!-- PROJECT_PAGE_START -->
+Reduce repeated structure DataFixerUpper work during startup and `/reload` by caching converted structure NBT with safe validation and vanilla fallback.
+
+![Structure DFU Cache workflow](docs/overview.png)
+
+## What it does
+
+- Resolves the server's structure resources once during startup or reload.
+- Hashes source bytes and the relevant DataFixer context.
+- Reuses validated converted NBT from a persistent cache.
+- Serves the result through one vanilla-compatible pack layer.
+
+## Safety boundary
+
+If any entry is missing, ambiguous or invalid, the cache layer refuses to publish and vanilla behavior remains authoritative. There is no gameplay-tick worker.
+
+## Compatibility
+
+Available for the supported Fabric and NeoForge versions listed on the platform Versions page. RinLib is required; Fabric builds also require Fabric API.
+
+## Download and support
+
+Use the platform Versions page for exact game-version and loader files. Report reproducible problems through the project GitHub Issues page.
+<!-- PROJECT_PAGE_END -->
+
+---
+
+## Additional technical details
 
 ## Contract
 
