@@ -3,7 +3,6 @@
 <!-- PROJECT_PAGE_START -->
 Reduce repeated structure DataFixerUpper work during startup and `/reload` by caching converted structure NBT with safe validation and vanilla fallback.
 
-![Structure DFU Cache workflow](docs/overview.png)
 
 ## What it does
 
