@@ -4,8 +4,11 @@ import com.mojang.datafixers.DataFixer;
 import com.mojang.logging.LogUtils;
 import dev.rinchan.structuredfucache.StructureDfuCache;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -52,23 +55,30 @@ public final class StructureCacheBootstrap {
     ) {
         Path generation = null;
         try {
-            CacheSnapshot snapshot = new StructureCacheBuilder(dataFixer, cacheRoot, workers).build(original, identity);
-            CacheBuildStats stats = snapshot.stats();
-            if (stats.totalResources() == 0 || stats.vanillaFallbacks() > 0
-                || snapshot.preparedResources().size() != stats.totalResources()) {
-                logReady(stats, workers, "vanilla resources");
-                return new PreparedStructureResources(original, null);
-            }
+            Files.createDirectories(cacheRoot);
+            // Keep index replacement, pruning and materialization in one exclusive maintenance window.
+            try (var channel = FileChannel.open(cacheRoot.resolve("prepare.lock"),
+                     StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                 var lock = channel.tryLock()) {
+                if (lock == null) {
+                    throw new CacheBuildException("Cache is being prepared by another process");
+                }
+                CacheSnapshot snapshot = new StructureCacheBuilder(dataFixer, cacheRoot, workers).build(original, identity);
+                CacheBuildStats stats = snapshot.stats();
+                if (stats.totalResources() == 0 || stats.vanillaFallbacks() > 0
+                    || snapshot.preparedResources().size() != stats.totalResources()) {
+                    logReady(stats, workers, "vanilla resources");
+                    return new PreparedStructureResources(original, null);
+                }
 
-            generation = materializeOverlay(cacheRoot, snapshot);
-            PackResources preparedPack = new PathPackResources(OVERLAY_INFO, generation);
-            ResourceManager prepared = new MultiPackResourceManager(PackType.SERVER_DATA, List.of(preparedPack));
-            logReady(stats, workers, generation.toString());
-            return new PreparedStructureResources(prepared, generation);
-        } catch (RuntimeException exception) {
-            if (generation != null) {
-                deleteTree(generation);
+                generation = materializeOverlay(cacheRoot, snapshot);
+                PackResources preparedPack = new PathPackResources(OVERLAY_INFO, generation);
+                ResourceManager prepared = new MultiPackResourceManager(PackType.SERVER_DATA, List.of(preparedPack));
+                logReady(stats, workers, generation.toString());
+                return new PreparedStructureResources(prepared, generation);
             }
+        } catch (IOException | RuntimeException exception) {
+            deleteTree(generation);
             LOGGER.error(
                 "Structure DFU cache disabled for this resource generation; vanilla structure loading remains active: {}",
                 rootMessage(exception)
@@ -78,9 +88,7 @@ public final class StructureCacheBootstrap {
     }
 
     public static void retireGeneration(Path generation) {
-        if (generation != null) {
-            deleteTree(generation);
-        }
+        deleteTree(generation);
     }
 
     static int adaptiveWorkerThreads() {
@@ -93,7 +101,7 @@ public final class StructureCacheBootstrap {
         }
         int cpuBudget = Math.max(1, availableProcessors - 1);
         long conversionHeap = Math.max(0L, maximumHeapBytes - RESERVED_HEAP_BYTES);
-        int heapBudget = (int)Math.max(1L, conversionHeap / BYTES_PER_CONVERSION_WORKER);
+        int heapBudget = (int)Math.clamp(conversionHeap / BYTES_PER_CONVERSION_WORKER, 1L, MAX_WORKERS);
         return Math.min(MAX_WORKERS, Math.min(cpuBudget, heapBudget));
     }
 
@@ -160,17 +168,17 @@ public final class StructureCacheBootstrap {
             for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
                 Files.deleteIfExists(path);
             }
-        } catch (IOException exception) {
+        } catch (IOException | UncheckedIOException exception) {
             LOGGER.warn("Unable to remove stale structure DFU overlay {}: {}", root, rootMessage(exception));
         }
     }
 
     private static void logReady(CacheBuildStats stats, int workers, String resourceLayer) {
         LOGGER.info(
-            "Structure DFU cache prepared before gameplay: resources={}, converted={}, current={}, cacheHits={}, vanillaFallbacks={}, workers={}, elapsed={} ms, slowest={}, layer={}",
+            "Structure DFU cache prepared before gameplay: resources={}, converted={}, passthrough={}, cacheHits={}, vanillaFallbacks={}, workers={}, elapsed={} ms, slowest={}, layer={}",
             stats.totalResources(),
             stats.converted(),
-            stats.current(),
+            stats.passthrough(),
             stats.cacheHits(),
             stats.vanillaFallbacks(),
             workers,

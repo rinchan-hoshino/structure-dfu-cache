@@ -1,0 +1,18 @@
+{
+  "java": "Homebrew OpenJDK 21.0.12.1",
+  "minecraft": "1.21.1",
+  "neoforge": "21.1.248",
+  "tests": {
+    "tests": 30,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "artifact": "structure-dfu-cache-neoforge-1.0.1.jar",
+  "bytes": 60158,
+  "sha256": "dc1349deec8ed875d3b7ddbd37533f1026e7a2092be4f7714db424a9baf10c35",
+  "commands": [
+    "./gradlew clean test build --offline --console=plain",
+    "./gradlew build --offline --console=plain"
+  ]
+}

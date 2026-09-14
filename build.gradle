@@ -86,3 +86,8 @@ tasks.named('jar', Jar) {
         rename { 'LICENSE_structure_dfu_cache' }
     }
 }
+
+// Allow local smoke tests and developers to issue reload/stop commands from the console.
+tasks.named('runServer', JavaExec) {
+    standardInput = System.in
+}
