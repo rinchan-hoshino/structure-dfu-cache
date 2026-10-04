@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.mojang.datafixers.DataFixer;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -18,33 +19,37 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.IntTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.resources.ResourceLocation;
+import dev.rinchan.rinlib.minecraft.StructureResources;
 import net.minecraft.server.packs.PackResources;
 import net.minecraft.server.packs.resources.IoSupplier;
 import net.minecraft.server.packs.resources.Resource;
-import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.datafix.DataFixers;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class StructureCacheBuilderTest {
-    private static final int TARGET_DATA_VERSION = 3955;
+    private static final int TARGET_DATA_VERSION = detectVersion();
+    private static int detectVersion() {
+        net.minecraft.SharedConstants.tryDetectVersion();
+        return StructureResources.dataVersion();
+    }
     private static final CacheIdentity IDENTITY = new CacheIdentity(
         CacheIdentity.CURRENT_FORMAT,
         TARGET_DATA_VERSION,
         "1.21.1",
         "21.1.248"
     );
-    private static final ResourceLocation LOCATION = ResourceLocation.fromNamespaceAndPath("example", "structure/old.nbt");
-    private static final ResourceLocation DUPLICATE_LOCATION = ResourceLocation.fromNamespaceAndPath(
-        "example",
-        "structure/duplicate.nbt"
-    );
+    private static final String LOCATION = "example:" + StructureResources.directory() + "/old.nbt";
+    private static final String DUPLICATE_LOCATION = "example:" + StructureResources.directory() + "/duplicate.nbt";
 
     @TempDir
     Path temporaryDirectory;
@@ -60,7 +65,7 @@ class StructureCacheBuilderTest {
         assertEquals(1, cold.stats().converted());
         assertEquals(0, cold.stats().cacheHits());
         try (var input = Files.newInputStream(firstBlob)) {
-            CompoundTag actual = net.minecraft.nbt.NbtIo.readCompressed(input, net.minecraft.nbt.NbtAccounter.unlimitedHeap());
+            CompoundTag actual = StructureResources.readCompressed(input.readAllBytes(), StructureCacheBuilder.MAX_DECODED_NBT_BYTES);
             CompoundTag expected = net.minecraft.util.datafix.DataFixTypes.STRUCTURE.update(
                 DataFixers.getDataFixer(),
                 StructureCacheBuilder.readCompressed(original, StructureCacheBuilder.MAX_DECODED_NBT_BYTES),
@@ -97,10 +102,39 @@ class StructureCacheBuilderTest {
         assertEquals(0, rebuilt.stats().cacheHits());
         assertEquals(1, rebuilt.stats().converted());
         try (var input = Files.newInputStream(rebuilt.preparedResources().get(LOCATION))) {
-            CompoundTag actual = net.minecraft.nbt.NbtIo.readCompressed(input, net.minecraft.nbt.NbtAccounter.unlimitedHeap());
-            assertEquals("integrity", actual.getString("author"));
-            assertEquals(TARGET_DATA_VERSION, actual.getInt("DataVersion"));
+            CompoundTag actual = StructureResources.readCompressed(input.readAllBytes(), StructureCacheBuilder.MAX_DECODED_NBT_BYTES);
+            assertEquals(net.minecraft.nbt.StringTag.valueOf("integrity"), actual.get("author"));
+            assertEquals(TARGET_DATA_VERSION, net.minecraft.nbt.NbtUtils.getDataVersion(actual, -1));
         }
+    }
+
+    @Test
+    void missingIndexDoesNotTrustAnExistingConvertedBlob() throws Exception {
+        byte[] original = compressedStructure("orphan");
+        Path blob = builder().build(manager(original), IDENTITY).preparedResources().get(LOCATION);
+        Files.write(blob, new byte[] {1, 2, 3});
+        Files.delete(temporaryDirectory.resolve("index.json"));
+
+        CacheSnapshot rebuilt = builder().build(manager(original), IDENTITY);
+
+        assertEquals(0, rebuilt.stats().cacheHits());
+        CompoundTag actual = StructureCacheBuilder.readCompressed(
+            Files.readAllBytes(rebuilt.preparedResources().get(LOCATION)), 1024 * 1024);
+        assertEquals(net.minecraft.nbt.StringTag.valueOf("orphan"), actual.get("author"));
+        assertEquals(TARGET_DATA_VERSION, net.minecraft.nbt.NbtUtils.getDataVersion(actual, -1));
+    }
+
+    @Test
+    void corruptIndexDoesNotTrustAnExistingPassthroughBlob() throws Exception {
+        byte[] original = new byte[] {1, 2, 3};
+        Path blob = builder().build(manager(original), IDENTITY).preparedResources().get(LOCATION);
+        Files.write(blob, new byte[] {9, 8, 7});
+        Files.writeString(temporaryDirectory.resolve("index.json"), "not-json");
+
+        CacheSnapshot rebuilt = builder().build(manager(original), IDENTITY);
+
+        assertEquals(0, rebuilt.stats().cacheHits());
+        assertArrayEquals(original, Files.readAllBytes(rebuilt.preparedResources().get(LOCATION)));
     }
 
     @Test
@@ -135,20 +169,40 @@ class StructureCacheBuilderTest {
     @Test
     void duplicateContentIsConvertedOnceAndSharedAcrossWorkers() {
         byte[] duplicate = compressedStructure("shared");
-        CacheSnapshot snapshot = builder().build(
+        AtomicInteger conversions = new AtomicInteger();
+        StructureCacheBuilder builder = new StructureCacheBuilder(countingFixer(conversions, false), temporaryDirectory, 2);
+        CacheSnapshot snapshot = builder.build(
             manager(Map.of(LOCATION, duplicate, DUPLICATE_LOCATION, duplicate)),
             IDENTITY
         );
 
+        assertEquals(1, conversions.get());
         assertEquals(1, snapshot.stats().converted());
         assertEquals(1, snapshot.stats().cacheHits());
+        assertFalse(Files.exists(temporaryDirectory.resolve("sources")));
         assertEquals(snapshot.preparedResources().get(LOCATION), snapshot.preparedResources().get(DUPLICATE_LOCATION));
     }
 
     @Test
+    void failedConversionIsSharedAndPreservesSourceBytes() throws Exception {
+        byte[] original = compressedStructure("failed-conversion");
+        AtomicInteger conversions = new AtomicInteger();
+        StructureCacheBuilder builder = new StructureCacheBuilder(countingFixer(conversions, true), temporaryDirectory, 2);
+        CacheSnapshot snapshot = builder.build(
+            manager(Map.of(LOCATION, original, DUPLICATE_LOCATION, original)), IDENTITY);
+
+        assertEquals(1, conversions.get());
+        assertEquals(0, snapshot.stats().converted());
+        assertEquals(0, snapshot.stats().vanillaFallbacks());
+        assertEquals(1, snapshot.stats().cacheHits());
+        assertEquals(snapshot.preparedResources().get(LOCATION), snapshot.preparedResources().get(DUPLICATE_LOCATION));
+        assertArrayEquals(original, Files.readAllBytes(snapshot.preparedResources().get(LOCATION)));
+    }
+
+    @Test
     void oneUnreadableResourcePreventsPartialIndexPublication() {
-        ResourceLocation brokenLocation = ResourceLocation.fromNamespaceAndPath("example", "structure/broken.nbt");
-        Map<ResourceLocation, Resource> resources = Map.of(
+        String brokenLocation = "example:" + StructureResources.directory() + "/broken.nbt";
+        Map<String, Resource> resources = Map.of(
             LOCATION,
             resource(() -> new ByteArrayInputStream(compressedStructure("readable"))),
             brokenLocation,
@@ -170,7 +224,7 @@ class StructureCacheBuilderTest {
         byte[] malformed = new byte[] {1, 2, 3};
         CacheSnapshot snapshot = builder().build(manager(malformed), IDENTITY);
 
-        assertEquals(1, snapshot.stats().current());
+        assertEquals(1, snapshot.stats().passthrough());
         assertEquals(0, snapshot.stats().vanillaFallbacks());
         assertArrayEquals(malformed, Files.readAllBytes(snapshot.preparedResources().get(LOCATION)));
         assertTrue(Files.isRegularFile(temporaryDirectory.resolve("index.json")));
@@ -209,13 +263,131 @@ class StructureCacheBuilderTest {
         assertThrows(RuntimeException.class, () -> StructureCacheBuilder.readCompressed(output.toByteArray(), 1024L));
     }
 
+    @Test
+    void currentAndFutureTemplatesRemainByteIdenticalWithoutInvokingDfu() throws Exception {
+        AtomicInteger conversions = new AtomicInteger();
+        StructureCacheBuilder builder = new StructureCacheBuilder(countingFixer(conversions, true), temporaryDirectory, 2);
+        for (int version : new int[] {TARGET_DATA_VERSION, TARGET_DATA_VERSION + 1}) {
+            byte[] bytes = compressedStructure("passthrough", version);
+            CacheSnapshot snapshot = builder.build(manager(bytes), IDENTITY);
+            assertEquals(1, snapshot.stats().passthrough());
+            assertArrayEquals(bytes, Files.readAllBytes(snapshot.preparedResources().get(LOCATION)));
+        }
+        assertEquals(0, conversions.get());
+    }
+
+    @Test
+    void fatalWorkerErrorsAreNotHiddenByVanillaFallback() {
+        Map<String, Resource> resources = managerFromResources(Map.of(LOCATION, resource(() -> {
+            throw new AssertionError("negative fixture: fatal worker failure");
+        })));
+        assertThrows(AssertionError.class, () -> builder().build(resources, IDENTITY));
+        assertFalse(Files.exists(temporaryDirectory.resolve("index.json")));
+    }
+
+    @Test
+    void interruptionWaitsForWorkersAndPreservesInterruptStatus() throws Exception {
+        CountDownLatch reading = new CountDownLatch(1);
+        CountDownLatch cancelled = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicBoolean closed = new AtomicBoolean();
+        AtomicBoolean interrupted = new AtomicBoolean();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Map<String, Resource> resources = managerFromResources(Map.of(LOCATION, resource(() -> {
+            reading.countDown();
+            while (true) {
+                try {
+                    release.await();
+                    break;
+                } catch (InterruptedException exception) {
+                    cancelled.countDown(); // Model a source that needs time to unwind after cancellation.
+                }
+            }
+            return new ByteArrayInputStream(new byte[] {1, 2, 3}) {
+                @Override
+                public void close() {
+                    closed.set(true);
+                }
+            };
+        })));
+        Thread caller = new Thread(() -> {
+            try {
+                builder().build(resources, IDENTITY);
+            } catch (Throwable exception) {
+                failure.set(exception);
+            } finally {
+                interrupted.set(Thread.currentThread().isInterrupted());
+            }
+        });
+        caller.start();
+        try {
+            assertTrue(reading.await(10, TimeUnit.SECONDS));
+            caller.interrupt();
+            assertTrue(cancelled.await(10, TimeUnit.SECONDS));
+            assertTrue(caller.isAlive(), "preparation must not return while its worker still reads resources");
+        } finally {
+            release.countDown();
+            caller.join(10000);
+        }
+        assertFalse(caller.isAlive());
+        assertTrue(closed.get());
+        assertTrue(interrupted.get());
+        assertTrue(failure.get() instanceof CacheBuildException);
+        assertFalse(Files.exists(temporaryDirectory.resolve("index.json")));
+    }
+
+    @Test
+    void indexCannotRedirectReadsOrDeletionOutsideTheCache() throws Exception {
+        byte[] original = compressedStructure("redirect");
+        builder().build(manager(original), IDENTITY);
+        Path sentinel = temporaryDirectory.resolveSibling(temporaryDirectory.getFileName() + "-sentinel");
+        try {
+            Files.writeString(sentinel, "leave intact");
+            CacheEntry redirected = new CacheEntry(CacheKey.sha256(original), "0".repeat(64), sentinel.toString(), true);
+            CacheIndexStore.writeAtomic(temporaryDirectory.resolve("index.json"),
+                new CacheIndex(IDENTITY, Map.of(LOCATION.toString(), redirected)));
+            CacheSnapshot snapshot = builder().build(manager(original), IDENTITY);
+            assertEquals(1, snapshot.stats().converted());
+            assertEquals("leave intact", Files.readString(sentinel));
+        } finally {
+            Files.deleteIfExists(sentinel);
+        }
+    }
+
+    @Test
+    void cacheWriteFailureDoesNotBecomeAReportedSuccessfulPassthrough() throws Exception {
+        Files.writeString(temporaryDirectory.resolve("blobs"), "not a directory");
+        CacheSnapshot snapshot = builder().build(manager(compressedStructure("disk-failure")), IDENTITY);
+        assertEquals(1, snapshot.stats().vanillaFallbacks());
+        assertTrue(snapshot.preparedResources().isEmpty());
+        assertFalse(Files.exists(temporaryDirectory.resolve("index.json")));
+    }
+
+    private static DataFixer countingFixer(AtomicInteger conversions, boolean fail) {
+        return (DataFixer)Proxy.newProxyInstance(
+            DataFixer.class.getClassLoader(), new Class<?>[] {DataFixer.class},
+            (proxy, method, arguments) -> {
+                if (method.getName().equals("update")) {
+                    conversions.incrementAndGet();
+                    if (fail) {
+                        throw new IllegalStateException("negative fixture: conversion failed");
+                    }
+                }
+                return method.invoke(DataFixers.getDataFixer(), arguments);
+            });
+    }
+
     private StructureCacheBuilder builder() {
         return new StructureCacheBuilder(DataFixers.getDataFixer(), temporaryDirectory, 2);
     }
 
     private static byte[] compressedStructure(String marker) {
+        return compressedStructure(marker, 1000);
+    }
+
+    private static byte[] compressedStructure(String marker, int version) {
         CompoundTag tag = new CompoundTag();
-        tag.putInt("DataVersion", 1000);
+        tag.putInt("DataVersion", version);
         tag.putString("author", marker);
         tag.put("size", ints(1, 1, 1));
         ListTag palette = new ListTag();
@@ -247,12 +419,12 @@ class StructureCacheBuilderTest {
         return list;
     }
 
-    private static ResourceManager manager(byte[] bytes) {
+    private static Map<String, Resource> manager(byte[] bytes) {
         return manager(Map.of(LOCATION, bytes));
     }
 
-    private static ResourceManager manager(Map<ResourceLocation, byte[]> resources) {
-        Map<ResourceLocation, Resource> resolved = resources.entrySet().stream().collect(
+    private static Map<String, Resource> manager(Map<String, byte[]> resources) {
+        Map<String, Resource> resolved = resources.entrySet().stream().collect(
             java.util.stream.Collectors.toUnmodifiableMap(
                 Map.Entry::getKey,
                 entry -> resource(() -> new ByteArrayInputStream(entry.getValue()))
@@ -261,49 +433,8 @@ class StructureCacheBuilderTest {
         return managerFromResources(resolved);
     }
 
-    private static ResourceManager managerFromResources(Map<ResourceLocation, Resource> resolved) {
-        return new ResourceManager() {
-            @Override
-            public Set<String> getNamespaces() {
-                return Set.of("example");
-            }
-
-            @Override
-            public Optional<Resource> getResource(ResourceLocation location) {
-                return Optional.ofNullable(resolved.get(location));
-            }
-
-            @Override
-            public List<Resource> getResourceStack(ResourceLocation location) {
-                Resource found = resolved.get(location);
-                return found == null ? List.of() : List.of(found);
-            }
-
-            @Override
-            public Map<ResourceLocation, Resource> listResources(String path, java.util.function.Predicate<ResourceLocation> filter) {
-                if (!path.equals("structure")) {
-                    return Map.of();
-                }
-                return resolved.entrySet().stream()
-                    .filter(entry -> filter.test(entry.getKey()))
-                    .collect(java.util.stream.Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
-            }
-
-            @Override
-            public Map<ResourceLocation, List<Resource>> listResourceStacks(
-                String path,
-                java.util.function.Predicate<ResourceLocation> filter
-            ) {
-                return listResources(path, filter).entrySet().stream().collect(
-                    java.util.stream.Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> List.of(entry.getValue()))
-                );
-            }
-
-            @Override
-            public Stream<PackResources> listPacks() {
-                return Stream.of(packResources());
-            }
-        };
+    private static Map<String, Resource> managerFromResources(Map<String, Resource> resolved) {
+        return resolved;
     }
 
     private static Resource resource(IoSupplier<InputStream> supplier) {

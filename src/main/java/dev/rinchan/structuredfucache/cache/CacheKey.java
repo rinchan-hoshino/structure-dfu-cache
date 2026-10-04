@@ -7,15 +7,22 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.regex.Pattern;
 
 public record CacheKey(String digest, CacheIdentity identity) {
+    private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
+
     public CacheKey {
-        if (digest == null || !digest.matches("[0-9a-f]{64}")) {
+        if (!isDigest(digest)) {
             throw new IllegalArgumentException("digest must be a lowercase SHA-256 value");
         }
         if (identity == null) {
             throw new IllegalArgumentException("identity must not be null");
         }
+    }
+
+    static boolean isDigest(String digest) {
+        return digest != null && SHA256.matcher(digest).matches();
     }
 
     public static CacheKey of(byte[] sourceBytes, CacheIdentity identity) {
@@ -38,7 +45,7 @@ public record CacheKey(String digest, CacheIdentity identity) {
         return HexFormat.of().formatHex(digest.digest());
     }
 
-    private static MessageDigest newDigest() {
+    static MessageDigest newDigest() {
         try {
             return MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException exception) {

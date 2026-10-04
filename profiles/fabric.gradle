@@ -1,0 +1,7 @@
+plugins { id 'fabric-loom' version '1.14.7' }
+apply from: rootProject.file('profiles/common.gradle')
+dependencies {
+    minecraft "com.mojang:minecraft:${target.minecraft}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${target.fabric_loader_version}"
+}

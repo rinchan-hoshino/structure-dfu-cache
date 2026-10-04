@@ -2,8 +2,8 @@ package dev.rinchan.structuredfucache.cache;
 
 import java.nio.charset.StandardCharsets;
 
-public record CacheIdentity(int formatVersion, int targetDataVersion, String minecraftVersion, String neoForgeVersion) {
-    public static final int CURRENT_FORMAT = 3;
+public record CacheIdentity(int formatVersion, int targetDataVersion, String minecraftVersion, String loaderVersion) {
+    public static final int CURRENT_FORMAT = 4;
 
     public CacheIdentity {
         if (formatVersion != CURRENT_FORMAT) {
@@ -15,8 +15,8 @@ public record CacheIdentity(int formatVersion, int targetDataVersion, String min
         if (minecraftVersion == null || minecraftVersion.isBlank()) {
             throw new IllegalArgumentException("minecraftVersion must not be blank");
         }
-        if (neoForgeVersion == null || neoForgeVersion.isBlank()) {
-            throw new IllegalArgumentException("neoForgeVersion must not be blank");
+        if (loaderVersion == null || loaderVersion.isBlank()) {
+            throw new IllegalArgumentException("loaderVersion must not be blank");
         }
     }
 
@@ -26,7 +26,7 @@ public record CacheIdentity(int formatVersion, int targetDataVersion, String min
             "structure-dfu-cache=" + formatVersion,
             "data=" + targetDataVersion,
             "minecraft=" + minecraftVersion,
-            "neoforge=" + neoForgeVersion
+            "loader=" + loaderVersion
         );
     }
 

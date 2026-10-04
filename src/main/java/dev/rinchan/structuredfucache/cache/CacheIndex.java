@@ -1,6 +1,8 @@
 package dev.rinchan.structuredfucache.cache;
 
+import java.util.Collections;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 
 public record CacheIndex(CacheIdentity identity, Map<String, CacheEntry> entries) {
@@ -11,6 +13,7 @@ public record CacheIndex(CacheIdentity identity, Map<String, CacheEntry> entries
         if (entries == null) {
             throw new IllegalArgumentException("entries must not be null");
         }
-        entries = Map.copyOf(new TreeMap<>(entries));
+        entries.values().forEach(Objects::requireNonNull);
+        entries = Collections.unmodifiableMap(new TreeMap<>(entries));
     }
 }

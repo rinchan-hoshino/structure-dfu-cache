@@ -4,43 +4,50 @@ import com.mojang.datafixers.DataFixer;
 import com.mojang.logging.LogUtils;
 import dev.rinchan.structuredfucache.StructureDfuCache;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Comparator;
-import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
-import net.minecraft.SharedConstants;
-import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.packs.PackLocationInfo;
-import net.minecraft.server.packs.PackResources;
-import net.minecraft.server.packs.PackType;
-import net.minecraft.server.packs.PathPackResources;
-import net.minecraft.server.packs.repository.PackSource;
+import dev.rinchan.rinlib.minecraft.StructureLifecycle;
+import dev.rinchan.rinlib.minecraft.StructureResources;
 import net.minecraft.server.packs.resources.MultiPackResourceManager;
 import net.minecraft.server.packs.resources.ResourceManager;
-import net.neoforged.fml.loading.FMLLoader;
-import net.neoforged.fml.loading.FMLPaths;
 import org.slf4j.Logger;
 
-public final class StructureCacheBootstrap {
+public final class StructureCacheBootstrap implements StructureLifecycle.Preparation {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final long RESERVED_HEAP_BYTES = 2L * 1024L * 1024L * 1024L;
     private static final long BYTES_PER_CONVERSION_WORKER = 1024L * 1024L * 1024L;
     private static final int MAX_WORKERS = 4;
-    private static final PackLocationInfo OVERLAY_INFO = new PackLocationInfo(
-        StructureDfuCache.MOD_ID + "_generated",
-        Component.literal("Structure DFU Cache generated overlay"),
-        PackSource.BUILT_IN,
-        Optional.empty()
-    );
+    private final Path cacheRoot;
+    private final CacheIdentity identity;
+    private PreparedStructureResources current;
+    private PreparedStructureResources previous;
 
-    private StructureCacheBootstrap() {
+    public StructureCacheBootstrap(Path cacheRoot, String loaderVersion) {
+        this.cacheRoot = cacheRoot;
+        this.identity = new CacheIdentity(CacheIdentity.CURRENT_FORMAT, StructureResources.dataVersion(),
+            StructureResources.minecraftVersion(), loaderVersion);
     }
 
-    public static PreparedStructureResources prepare(ResourceManager original, DataFixer dataFixer) {
-        return prepare(original, dataFixer, cacheRoot(), identity(), adaptiveWorkerThreads());
+    @Override
+    public ResourceManager prepare(ResourceManager original, DataFixer dataFixer) {
+        var prepared = prepare(original, dataFixer, cacheRoot, identity, adaptiveWorkerThreads());
+        if (previous != null) previous.close();
+        previous = current;
+        current = prepared;
+        return prepared.resourceManager();
+    }
+
+    @Override
+    public void close() {
+        if (previous != null) previous.close();
+        if (current != null) current.close();
+        previous = null;
+        current = null;
     }
 
     static PreparedStructureResources prepare(
@@ -52,34 +59,34 @@ public final class StructureCacheBootstrap {
     ) {
         Path generation = null;
         try {
-            CacheSnapshot snapshot = new StructureCacheBuilder(dataFixer, cacheRoot, workers).build(original, identity);
-            CacheBuildStats stats = snapshot.stats();
-            if (stats.totalResources() == 0 || stats.vanillaFallbacks() > 0
-                || snapshot.preparedResources().size() != stats.totalResources()) {
-                logReady(stats, workers, "vanilla resources");
-                return new PreparedStructureResources(original, null);
-            }
+            Files.createDirectories(cacheRoot);
+            // Keep index replacement, pruning and materialization in one exclusive maintenance window.
+            try (var channel = FileChannel.open(cacheRoot.resolve("prepare.lock"),
+                     StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                 var lock = channel.tryLock()) {
+                if (lock == null) {
+                    throw new CacheBuildException("Cache is being prepared by another process");
+                }
+                CacheSnapshot snapshot = new StructureCacheBuilder(dataFixer, cacheRoot, workers).build(StructureResources.list(original), identity);
+                CacheBuildStats stats = snapshot.stats();
+                if (stats.totalResources() == 0 || stats.vanillaFallbacks() > 0
+                    || snapshot.preparedResources().size() != stats.totalResources()) {
+                    logReady(stats, workers, "vanilla resources");
+                    return new PreparedStructureResources(original, null);
+                }
 
-            generation = materializeOverlay(cacheRoot, snapshot);
-            PackResources preparedPack = new PathPackResources(OVERLAY_INFO, generation);
-            ResourceManager prepared = new MultiPackResourceManager(PackType.SERVER_DATA, List.of(preparedPack));
-            logReady(stats, workers, generation.toString());
-            return new PreparedStructureResources(prepared, generation);
-        } catch (RuntimeException exception) {
-            if (generation != null) {
-                deleteTree(generation);
+                generation = materializeOverlay(cacheRoot, snapshot);
+                ResourceManager prepared = StructureResources.overlay(generation, StructureDfuCache.MOD_ID + "_generated");
+                logReady(stats, workers, generation.toString());
+                return new PreparedStructureResources(prepared, generation);
             }
+        } catch (IOException | RuntimeException exception) {
+            deleteTree(generation);
             LOGGER.error(
                 "Structure DFU cache disabled for this resource generation; vanilla structure loading remains active: {}",
                 rootMessage(exception)
             );
             return new PreparedStructureResources(original, null);
-        }
-    }
-
-    public static void retireGeneration(Path generation) {
-        if (generation != null) {
-            deleteTree(generation);
         }
     }
 
@@ -93,7 +100,7 @@ public final class StructureCacheBootstrap {
         }
         int cpuBudget = Math.max(1, availableProcessors - 1);
         long conversionHeap = Math.max(0L, maximumHeapBytes - RESERVED_HEAP_BYTES);
-        int heapBudget = (int)Math.max(1L, conversionHeap / BYTES_PER_CONVERSION_WORKER);
+        int heapBudget = (int)Math.min(MAX_WORKERS, Math.max(1L, conversionHeap / BYTES_PER_CONVERSION_WORKER));
         return Math.min(MAX_WORKERS, Math.min(cpuBudget, heapBudget));
     }
 
@@ -104,20 +111,11 @@ public final class StructureCacheBootstrap {
         try {
             Files.createDirectories(temporary.resolve("data"));
             for (var entry : snapshot.preparedResources().entrySet()) {
-                ResourceLocation location = entry.getKey();
-                Path target = temporary.resolve("data")
-                    .resolve(location.getNamespace())
-                    .resolve(location.getPath())
-                    .normalize();
-                if (!target.startsWith(temporary)) {
-                    throw new CacheBuildException("Generated resource escaped overlay root: " + location);
-                }
+                Path target = StructureResources.resourcePath(temporary, entry.getKey());
                 Files.createDirectories(target.getParent());
                 linkOrCopy(entry.getValue(), target);
             }
-            String metadata = "{\"pack\":{\"description\":\"Structure DFU Cache generated overlay\",\"pack_format\":"
-                + SharedConstants.getCurrentVersion().getPackVersion(PackType.SERVER_DATA) + "}}\n";
-            Files.writeString(temporary.resolve("pack.mcmeta"), metadata);
+            Files.writeString(temporary.resolve("pack.mcmeta"), StructureResources.packMetadata());
             try {
                 Files.move(temporary, completed, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
             } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
@@ -138,20 +136,6 @@ public final class StructureCacheBootstrap {
         }
     }
 
-    private static CacheIdentity identity() {
-        var version = FMLLoader.versionInfo();
-        return new CacheIdentity(
-            CacheIdentity.CURRENT_FORMAT,
-            SharedConstants.getCurrentVersion().getDataVersion().getVersion(),
-            version.mcVersion(),
-            version.neoForgeVersion()
-        );
-    }
-
-    private static Path cacheRoot() {
-        return FMLPaths.GAMEDIR.get().resolve("cache").resolve(StructureDfuCache.MOD_ID);
-    }
-
     private static void deleteTree(Path root) {
         if (root == null || !Files.exists(root)) {
             return;
@@ -160,17 +144,17 @@ public final class StructureCacheBootstrap {
             for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
                 Files.deleteIfExists(path);
             }
-        } catch (IOException exception) {
+        } catch (IOException | UncheckedIOException exception) {
             LOGGER.warn("Unable to remove stale structure DFU overlay {}: {}", root, rootMessage(exception));
         }
     }
 
     private static void logReady(CacheBuildStats stats, int workers, String resourceLayer) {
         LOGGER.info(
-            "Structure DFU cache prepared before gameplay: resources={}, converted={}, current={}, cacheHits={}, vanillaFallbacks={}, workers={}, elapsed={} ms, slowest={}, layer={}",
+            "Structure DFU cache prepared before gameplay: resources={}, converted={}, passthrough={}, cacheHits={}, vanillaFallbacks={}, workers={}, elapsed={} ms, slowest={}, layer={}",
             stats.totalResources(),
             stats.converted(),
-            stats.current(),
+            stats.passthrough(),
             stats.cacheHits(),
             stats.vanillaFallbacks(),
             workers,
@@ -189,10 +173,17 @@ public final class StructureCacheBootstrap {
         return current.getClass().getSimpleName() + (message == null ? "" : ": " + message);
     }
 
-    public record PreparedStructureResources(ResourceManager resourceManager, Path generationRoot) {
+    public record PreparedStructureResources(ResourceManager resourceManager, Path generationRoot) implements AutoCloseable {
         public PreparedStructureResources {
             if (resourceManager == null) {
                 throw new IllegalArgumentException("resourceManager must not be null");
+            }
+        }
+
+        @Override public void close() {
+            if (generationRoot != null) {
+                ((MultiPackResourceManager) resourceManager).close();
+                deleteTree(generationRoot);
             }
         }
     }

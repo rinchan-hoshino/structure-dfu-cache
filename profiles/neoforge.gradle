@@ -1,0 +1,14 @@
+plugins { id 'net.neoforged.moddev' version '2.0.141' }
+apply from: rootProject.file('profiles/common.gradle')
+neoForge {
+    version = target.neo_version
+    mods { structure_dfu_cache { sourceSet sourceSets.main } }
+    unitTest {
+        enable()
+        testedMod = mods.structure_dfu_cache
+    }
+    runs {
+        server { server(); programArgument '--nogui' }
+    }
+}
+tasks.named('runServer') { standardInput = System.in }

@@ -3,7 +3,7 @@ package dev.rinchan.structuredfucache.cache;
 public record CacheBuildStats(
     int totalResources,
     int converted,
-    int current,
+    int passthrough,
     int cacheHits,
     int vanillaFallbacks,
     long elapsedMillis,

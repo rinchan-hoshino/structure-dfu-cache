@@ -1,0 +1,90 @@
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+
+apply plugin: 'java-library'
+
+def game = providers.gradleProperty('profile').getOrElse('1.21.1')
+def loader = providers.gradleProperty('loader').getOrElse('neoforge')
+ext.target = new JsonSlurper().parse(file('profiles.json')).find { it.minecraft == game && it.loader == loader }
+if (target == null) throw new GradleException("Unsupported profile: ${game}-${loader}")
+group = mod_group_id
+version = mod_version + '+' + game
+layout.buildDirectory.set(file("build/profiles/${game}-${loader}"))
+base { archivesName = "structure-dfu-cache-${loader}" }
+java.toolchain.languageVersion = JavaLanguageVersion.of(target.java as int)
+repositories { mavenCentral() }
+sourceSets.main.java.srcDir file("${loader}/src/main/java")
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8'; options.compilerArgs.add('-Xlint:all') }
+tasks.withType(AbstractArchiveTask).configureEach { preserveFileTimestamps = false; reproducibleFileOrder = true }
+tasks.withType(Test).configureEach { useJUnitPlatform() }
+
+def rinlib = providers.gradleProperty('rinlibJar').getOrElse(
+    "../rinlib/build/profiles/${game}-${loader}/libs/rinlib-${loader}-1.2.0+${game}${loader == 'forge' ? '-dev' : ''}.jar")
+if (!file(rinlib).isFile()) throw new GradleException("Build RinLib ${game}-${loader} first: ${rinlib}")
+dependencies {
+    if (loader == 'fabric' && !game.startsWith('26.')) modImplementation files(rinlib)
+    else implementation files(rinlib)
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+def metadata = tasks.register('generateModMetadata') {
+    inputs.file 'profiles.json'
+    inputs.file 'gradle.properties'
+    inputs.property 'game', game
+    inputs.property 'loader', loader
+    outputs.dir layout.buildDirectory.dir('generated/metadata')
+    doLast {
+        def dest = layout.buildDirectory.dir('generated/metadata').get().asFile
+        dest.mkdirs()
+        if (loader == 'fabric') {
+            new File(dest, 'fabric.mod.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([
+                schemaVersion: 1, id: mod_id, version: project.version, name: mod_name,
+                description: mod_description, authors: [mod_authors], license: mod_license,
+                environment: '*', icon: 'icon.png',
+                contact: [sources: 'https://github.com/rinchan-hoshino/structure-dfu-cache',
+                          issues: 'https://github.com/rinchan-hoshino/structure-dfu-cache/issues'],
+                entrypoints: [main: ['dev.rinchan.structuredfucache.fabric.StructureDfuCacheFabric']],
+                depends: [fabricloader: ">=${target.fabric_loader_version}", minecraft: game,
+                          java: ">=${target.java}", rinlib: '>=1.2.0']])) + '\n'
+        } else {
+            def mandatory = loader == 'forge' ? 'mandatory=true' : 'type="required"'
+            def path = new File(dest, loader == 'forge' ? 'META-INF/mods.toml' : 'META-INF/neoforge.mods.toml')
+            path.parentFile.mkdirs()
+            def loaderVersion = loader == 'forge' ? target.forge_version : target.neo_version
+            path.text = """modLoader="javafml"
+loaderVersion="[1,)"
+license="${mod_license}"
+issueTrackerURL="https://github.com/rinchan-hoshino/structure-dfu-cache/issues"
+[[mods]]
+modId="${mod_id}"
+version="${project.version}"
+displayName="${mod_name}"
+authors="${mod_authors}"
+logoFile="icon.png"
+description='''${mod_description}'''
+[[dependencies.${mod_id}]]
+modId="minecraft"
+${mandatory}
+versionRange="[${game}]"
+ordering="NONE"
+side="BOTH"
+[[dependencies.${mod_id}]]
+modId="${loader}"
+${mandatory}
+versionRange="[${loaderVersion},)"
+ordering="NONE"
+side="BOTH"
+[[dependencies.${mod_id}]]
+modId="rinlib"
+${mandatory}
+versionRange="[1.2.0,)"
+ordering="AFTER"
+side="BOTH"
+"""
+        }
+    }
+}
+sourceSets.main.resources.srcDir metadata
+jar { from('LICENSE') { into 'META-INF'; rename { 'LICENSE_structure_dfu_cache' } } }

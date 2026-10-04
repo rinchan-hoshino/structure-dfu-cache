@@ -1,0 +1,604 @@
+{
+  "version": "1.1.0",
+  "shared_dfu_core_source_sha256": "ed43f90051c6a97cc1bfaf4d8df01a3e5cb1d0bac6768d9c07b95bc0596d3cf0",
+  "profiles": [
+    {
+      "profile": "1.21.1-neoforge",
+      "core_source_sha256": "ed43f90051c6a97cc1bfaf4d8df01a3e5cb1d0bac6768d9c07b95bc0596d3cf0",
+      "missing_dependency": {
+        "status": "PASS",
+        "exit_code": 0,
+        "checks": [
+          "loader reports the missing required RinLib dependency before world startup"
+        ]
+      },
+      "artifacts": {
+        "structure-dfu-cache": {
+          "file": "1.21.1-neoforge/structure-dfu-cache-neoforge-1.1.0+1.21.1.jar",
+          "sha256": "752ebea2b1ba8977b586b54df54d4ec44e31e2af08cc05b4600675a5ebb07c83",
+          "size": 50195
+        },
+        "rinlib": {
+          "file": "1.21.1-neoforge/rinlib-neoforge-1.2.0+1.21.1.jar",
+          "sha256": "866a72e93f9e11dff9d2e78c431f5a581361c6e1ea03ade57d0598e809094e33",
+          "size": 39516
+        }
+      },
+      "unit_tests": {
+        "structure-dfu-cache": {
+          "tests": 30,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "rinlib": {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "runtime": {
+        "profile": "1.21.1-neoforge",
+        "checks": [
+          "cold preparation before ready",
+          "old grass_path upgraded to dirt_path",
+          "block NBT and entity structure loading",
+          "reload uses cache without repeating DFU",
+          "highest-priority replacement invalidates the cached template",
+          "reload and shutdown release generated layers",
+          "restart reuses persistent cache and can place the structure"
+        ],
+        "cold": {
+          "resources": 1181,
+          "converted": 1,
+          "passthrough": 1178,
+          "cacheHits": 2,
+          "vanillaFallbacks": 0
+        },
+        "warm_reload": {
+          "resources": 1181,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1181,
+          "vanillaFallbacks": 0
+        },
+        "restart": {
+          "resources": 1181,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1181,
+          "vanillaFallbacks": 0
+        },
+        "status": "PASS"
+      }
+    },
+    {
+      "profile": "1.21.1-fabric",
+      "core_source_sha256": "ed43f90051c6a97cc1bfaf4d8df01a3e5cb1d0bac6768d9c07b95bc0596d3cf0",
+      "missing_dependency": {
+        "status": "PASS",
+        "exit_code": 1,
+        "checks": [
+          "loader reports the missing required RinLib dependency before world startup"
+        ]
+      },
+      "artifacts": {
+        "structure-dfu-cache": {
+          "file": "1.21.1-fabric/structure-dfu-cache-fabric-1.1.0+1.21.1.jar",
+          "sha256": "f4d9cb4ca3a20d688e21c1a05c518c73e7fcb259fb4af3175d2d333fb2b4cf22",
+          "size": 51024
+        },
+        "rinlib": {
+          "file": "1.21.1-fabric/rinlib-fabric-1.2.0+1.21.1.jar",
+          "sha256": "4ebdc101a2222c1e701fdd863b8291b165ff53179ffcc6ef19dc18ae47e3012a",
+          "size": 37801
+        }
+      },
+      "unit_tests": {
+        "structure-dfu-cache": {
+          "tests": 30,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "rinlib": {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "runtime": {
+        "profile": "1.21.1-fabric",
+        "checks": [
+          "cold preparation before ready",
+          "old grass_path upgraded to dirt_path",
+          "block NBT and entity structure loading",
+          "reload uses cache without repeating DFU",
+          "highest-priority replacement invalidates the cached template",
+          "reload and shutdown release generated layers",
+          "restart reuses persistent cache and can place the structure"
+        ],
+        "cold": {
+          "resources": 1181,
+          "converted": 1,
+          "passthrough": 1178,
+          "cacheHits": 2,
+          "vanillaFallbacks": 0
+        },
+        "warm_reload": {
+          "resources": 1181,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1181,
+          "vanillaFallbacks": 0
+        },
+        "restart": {
+          "resources": 1181,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1181,
+          "vanillaFallbacks": 0
+        },
+        "status": "PASS"
+      }
+    },
+    {
+      "profile": "26.2-neoforge",
+      "core_source_sha256": "ed43f90051c6a97cc1bfaf4d8df01a3e5cb1d0bac6768d9c07b95bc0596d3cf0",
+      "missing_dependency": {
+        "status": "PASS",
+        "exit_code": 1,
+        "checks": [
+          "loader reports the missing required RinLib dependency before world startup"
+        ]
+      },
+      "artifacts": {
+        "structure-dfu-cache": {
+          "file": "26.2-neoforge/structure-dfu-cache-neoforge-1.1.0+26.2.jar",
+          "sha256": "c56a3ad58383a4b67eb9baa3723624a874e119ffbb03b813519aaf4951af116a",
+          "size": 50262
+        },
+        "rinlib": {
+          "file": "26.2-neoforge/rinlib-neoforge-1.2.0+26.2.jar",
+          "sha256": "4c661499a73c7ccce133f98f47271e1ecfe1715e684c4d592711e2f1dfd2f3ba",
+          "size": 40012
+        }
+      },
+      "unit_tests": {
+        "structure-dfu-cache": {
+          "tests": 30,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "rinlib": {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "unindexed_corruption": {
+        "status": "PASS",
+        "stats": {
+          "resources": 1213,
+          "converted": 1,
+          "passthrough": 1210,
+          "cacheHits": 2,
+          "vanillaFallbacks": 0
+        },
+        "checks": [
+          "corrupt blob without index rebuilt from resource bytes",
+          "rebuilt template placed normally",
+          "generated layers released on shutdown"
+        ]
+      },
+      "runtime": {
+        "profile": "26.2-neoforge",
+        "checks": [
+          "cold preparation before ready",
+          "old grass_path upgraded to dirt_path",
+          "block NBT and entity structure loading",
+          "reload uses cache without repeating DFU",
+          "highest-priority replacement invalidates the cached template",
+          "reload and shutdown release generated layers",
+          "restart reuses persistent cache and can place the structure"
+        ],
+        "cold": {
+          "resources": 1213,
+          "converted": 1,
+          "passthrough": 1210,
+          "cacheHits": 2,
+          "vanillaFallbacks": 0
+        },
+        "warm_reload": {
+          "resources": 1213,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1213,
+          "vanillaFallbacks": 0
+        },
+        "restart": {
+          "resources": 1213,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1213,
+          "vanillaFallbacks": 0
+        },
+        "status": "PASS"
+      }
+    },
+    {
+      "profile": "26.2-fabric",
+      "core_source_sha256": "ed43f90051c6a97cc1bfaf4d8df01a3e5cb1d0bac6768d9c07b95bc0596d3cf0",
+      "missing_dependency": {
+        "status": "PASS",
+        "exit_code": 1,
+        "checks": [
+          "loader reports the missing required RinLib dependency before world startup"
+        ]
+      },
+      "artifacts": {
+        "structure-dfu-cache": {
+          "file": "26.2-fabric/structure-dfu-cache-fabric-1.1.0+26.2.jar",
+          "sha256": "2f242bb323ac959d861ef241147bf5c348e56031e179db096cd2ab26b721ae72",
+          "size": 50612
+        },
+        "rinlib": {
+          "file": "26.2-fabric/rinlib-fabric-1.2.0+26.2.jar",
+          "sha256": "f7d58d14b6cc098ba5453eebb07672ec4ad9be1d928109389ee6f9be71bf4de0",
+          "size": 38047
+        }
+      },
+      "unit_tests": {
+        "structure-dfu-cache": {
+          "tests": 30,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "rinlib": {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "runtime": {
+        "profile": "26.2-fabric",
+        "checks": [
+          "cold preparation before ready",
+          "old grass_path upgraded to dirt_path",
+          "block NBT and entity structure loading",
+          "reload uses cache without repeating DFU",
+          "highest-priority replacement invalidates the cached template",
+          "reload and shutdown release generated layers",
+          "restart reuses persistent cache and can place the structure"
+        ],
+        "cold": {
+          "resources": 1213,
+          "converted": 1,
+          "passthrough": 1210,
+          "cacheHits": 2,
+          "vanillaFallbacks": 0
+        },
+        "warm_reload": {
+          "resources": 1213,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1213,
+          "vanillaFallbacks": 0
+        },
+        "restart": {
+          "resources": 1213,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1213,
+          "vanillaFallbacks": 0
+        },
+        "status": "PASS"
+      }
+    },
+    {
+      "profile": "26.1.2-neoforge",
+      "core_source_sha256": "ed43f90051c6a97cc1bfaf4d8df01a3e5cb1d0bac6768d9c07b95bc0596d3cf0",
+      "missing_dependency": {
+        "status": "PASS",
+        "exit_code": 1,
+        "checks": [
+          "loader reports the missing required RinLib dependency before world startup"
+        ]
+      },
+      "artifacts": {
+        "structure-dfu-cache": {
+          "file": "26.1.2-neoforge/structure-dfu-cache-neoforge-1.1.0+26.1.2.jar",
+          "sha256": "ba5b3c1488a876277ce243f5815d3f95c1e880d9aa830532f31503af1ffd4b5d",
+          "size": 50262
+        },
+        "rinlib": {
+          "file": "26.1.2-neoforge/rinlib-neoforge-1.2.0+26.1.2.jar",
+          "sha256": "6c1ae76dc3d0a6db1b7954a57a4b2c546879fcdb1c2a5eace3ce3ca160d2638a",
+          "size": 40008
+        }
+      },
+      "unit_tests": {
+        "structure-dfu-cache": {
+          "tests": 30,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "rinlib": {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "runtime": {
+        "profile": "26.1.2-neoforge",
+        "checks": [
+          "cold preparation before ready",
+          "old grass_path upgraded to dirt_path",
+          "block NBT and entity structure loading",
+          "reload uses cache without repeating DFU",
+          "highest-priority replacement invalidates the cached template",
+          "reload and shutdown release generated layers",
+          "restart reuses persistent cache and can place the structure"
+        ],
+        "cold": {
+          "resources": 1203,
+          "converted": 1,
+          "passthrough": 1200,
+          "cacheHits": 2,
+          "vanillaFallbacks": 0
+        },
+        "warm_reload": {
+          "resources": 1203,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1203,
+          "vanillaFallbacks": 0
+        },
+        "restart": {
+          "resources": 1203,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1203,
+          "vanillaFallbacks": 0
+        },
+        "status": "PASS"
+      }
+    },
+    {
+      "profile": "26.1.2-fabric",
+      "core_source_sha256": "ed43f90051c6a97cc1bfaf4d8df01a3e5cb1d0bac6768d9c07b95bc0596d3cf0",
+      "missing_dependency": {
+        "status": "PASS",
+        "exit_code": 1,
+        "checks": [
+          "loader reports the missing required RinLib dependency before world startup"
+        ]
+      },
+      "artifacts": {
+        "structure-dfu-cache": {
+          "file": "26.1.2-fabric/structure-dfu-cache-fabric-1.1.0+26.1.2.jar",
+          "sha256": "3cb617e63a60e37e372b36530ec87fe301b4e4de55b61a2c8c10cf3061f859cb",
+          "size": 50613
+        },
+        "rinlib": {
+          "file": "26.1.2-fabric/rinlib-fabric-1.2.0+26.1.2.jar",
+          "sha256": "929ca59de3f88259251c9252c58b3621805ba1035e62092dab91fdb7aa8e75eb",
+          "size": 38049
+        }
+      },
+      "unit_tests": {
+        "structure-dfu-cache": {
+          "tests": 30,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "rinlib": {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "runtime": {
+        "profile": "26.1.2-fabric",
+        "checks": [
+          "cold preparation before ready",
+          "old grass_path upgraded to dirt_path",
+          "block NBT and entity structure loading",
+          "reload uses cache without repeating DFU",
+          "highest-priority replacement invalidates the cached template",
+          "reload and shutdown release generated layers",
+          "restart reuses persistent cache and can place the structure"
+        ],
+        "cold": {
+          "resources": 1203,
+          "converted": 1,
+          "passthrough": 1200,
+          "cacheHits": 2,
+          "vanillaFallbacks": 0
+        },
+        "warm_reload": {
+          "resources": 1203,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1203,
+          "vanillaFallbacks": 0
+        },
+        "restart": {
+          "resources": 1203,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1203,
+          "vanillaFallbacks": 0
+        },
+        "status": "PASS"
+      }
+    },
+    {
+      "profile": "1.20.1-forge",
+      "core_source_sha256": "ed43f90051c6a97cc1bfaf4d8df01a3e5cb1d0bac6768d9c07b95bc0596d3cf0",
+      "missing_dependency": {
+        "status": "PASS",
+        "exit_code": 0,
+        "checks": [
+          "loader reports the missing required RinLib dependency before world startup"
+        ]
+      },
+      "artifacts": {
+        "structure-dfu-cache": {
+          "file": "1.20.1-forge/structure-dfu-cache-forge-1.1.0+1.20.1.jar",
+          "sha256": "fed1b0e1da040212656baf36063e0eb9f9a2bb2d9a9c83683c9d27909b9020ef",
+          "size": 50578
+        },
+        "rinlib": {
+          "file": "1.20.1-forge/rinlib-forge-1.2.0+1.20.1.jar",
+          "sha256": "4ac0b8ae23220b9619e4c1040c2e61ddde86b75cdaf2293d0dfbcd6c46530b46",
+          "size": 25107
+        }
+      },
+      "unit_tests": {
+        "structure-dfu-cache": {
+          "tests": 30,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "rinlib": {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "unindexed_corruption": {
+        "status": "PASS",
+        "stats": {
+          "resources": 1011,
+          "converted": 1,
+          "passthrough": 1009,
+          "cacheHits": 1,
+          "vanillaFallbacks": 0
+        },
+        "checks": [
+          "corrupt blob without index rebuilt from resource bytes",
+          "rebuilt template placed normally",
+          "generated layers released on shutdown"
+        ]
+      },
+      "runtime": {
+        "profile": "1.20.1-forge",
+        "checks": [
+          "cold preparation before ready",
+          "old grass_path upgraded to dirt_path",
+          "block NBT and entity structure loading",
+          "reload uses cache without repeating DFU",
+          "highest-priority replacement invalidates the cached template",
+          "reload and shutdown release generated layers",
+          "restart reuses persistent cache and can place the structure"
+        ],
+        "cold": {
+          "resources": 1011,
+          "converted": 1,
+          "passthrough": 1009,
+          "cacheHits": 1,
+          "vanillaFallbacks": 0
+        },
+        "warm_reload": {
+          "resources": 1011,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1011,
+          "vanillaFallbacks": 0
+        },
+        "restart": {
+          "resources": 1011,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1011,
+          "vanillaFallbacks": 0
+        },
+        "status": "PASS"
+      }
+    },
+    {
+      "profile": "1.20.1-fabric",
+      "core_source_sha256": "ed43f90051c6a97cc1bfaf4d8df01a3e5cb1d0bac6768d9c07b95bc0596d3cf0",
+      "missing_dependency": {
+        "status": "PASS",
+        "exit_code": 1,
+        "checks": [
+          "loader reports the missing required RinLib dependency before world startup"
+        ]
+      },
+      "artifacts": {
+        "structure-dfu-cache": {
+          "file": "1.20.1-fabric/structure-dfu-cache-fabric-1.1.0+1.20.1.jar",
+          "sha256": "e119a3e39afac1c8f1ce96d01e959da7c839210a8e28f52d92bf2d7458d3bec1",
+          "size": 51012
+        },
+        "rinlib": {
+          "file": "1.20.1-fabric/rinlib-fabric-1.2.0+1.20.1.jar",
+          "sha256": "8f484efcc3db00c721e896b478a83345e2a3509c3ce2d63f0757d3bf06289be8",
+          "size": 24747
+        }
+      },
+      "unit_tests": {
+        "structure-dfu-cache": {
+          "tests": 30,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "rinlib": {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "runtime": {
+        "profile": "1.20.1-fabric",
+        "checks": [
+          "cold preparation before ready",
+          "old grass_path upgraded to dirt_path",
+          "block NBT and entity structure loading",
+          "reload uses cache without repeating DFU",
+          "highest-priority replacement invalidates the cached template",
+          "reload and shutdown release generated layers",
+          "restart reuses persistent cache and can place the structure"
+        ],
+        "cold": {
+          "resources": 1011,
+          "converted": 1,
+          "passthrough": 1009,
+          "cacheHits": 1,
+          "vanillaFallbacks": 0
+        },
+        "warm_reload": {
+          "resources": 1011,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1011,
+          "vanillaFallbacks": 0
+        },
+        "restart": {
+          "resources": 1011,
+          "converted": 0,
+          "passthrough": 0,
+          "cacheHits": 1011,
+          "vanillaFallbacks": 0
+        },
+        "status": "PASS"
+      }
+    }
+  ]
+}

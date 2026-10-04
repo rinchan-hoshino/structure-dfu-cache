@@ -30,10 +30,27 @@ class CacheIndexStoreTest {
     }
 
     @Test
+    void indexBytesAreIndependentOfEntryInsertionOrder() throws Exception {
+        var identity = new CacheIdentity(CacheIdentity.CURRENT_FORMAT, 3955, "1.21.1", "21.1.248");
+        var entry = new CacheEntry("a".repeat(64), "b".repeat(64), "blobs/abc.nbt", true);
+        var entries = new java.util.LinkedHashMap<String, CacheEntry>();
+        entries.put("example:z", entry);
+        entries.put("example:a", entry);
+        Path first = temporaryDirectory.resolve("first.json");
+        Path second = temporaryDirectory.resolve("second.json");
+        CacheIndexStore.writeAtomic(first, new CacheIndex(identity, entries));
+        entries.clear();
+        entries.put("example:a", entry);
+        entries.put("example:z", entry);
+        CacheIndexStore.writeAtomic(second, new CacheIndex(identity, entries));
+        assertEquals(Files.readString(first), Files.readString(second));
+    }
+
+    @Test
     void currentIndexWithoutBlobDigestIsIgnored() throws Exception {
         Path indexPath = temporaryDirectory.resolve("index.json");
         Files.writeString(indexPath, """
-            {"identity":{"formatVersion":3,"targetDataVersion":3955,"minecraftVersion":"1.21.1","neoForgeVersion":"21.1.248"},
+            {"identity":{"formatVersion":4,"targetDataVersion":3955,"minecraftVersion":"1.21.1","loaderVersion":"neoforge:21.1.248"},
              "entries":{"example:structure/test.nbt":{"digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","blobPath":"blobs/abc.nbt","converted":true}}}
             """);
 
