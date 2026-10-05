@@ -16,7 +16,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletionService;
@@ -67,7 +66,8 @@ public final class StructureCacheBuilder {
     public CacheSnapshot build(Map<String, Resource> resources, CacheIdentity identity) {
         long startedNanos = System.nanoTime();
         Map<String, Resource> listed = new TreeMap<>(resources);
-        Map<String, CacheEntry> previousEntries = readPreviousIndex(identity).map(CacheIndex::entries).orElse(Map.of());
+        PreviousIndex previousIndex = readPreviousIndex(identity);
+        Map<String, CacheEntry> previousEntries = previousIndex.entries();
         List<ResourceResult> results = processResources(listed, previousEntries, identity);
 
         Map<String, CacheEntry> nextEntries = new TreeMap<>();
@@ -76,13 +76,17 @@ public final class StructureCacheBuilder {
         int passthrough = 0;
         int cacheHits = 0;
         int vanillaFallbacks = 0;
+        int repaired = 0;
+        int unoptimized = 0;
         for (ResourceResult result : results) {
             PreparedBlob blob = result.blob();
             if (blob == null) {
                 vanillaFallbacks++;
                 continue;
             }
-            nextEntries.put(result.location().toString(), blob.entry());
+            if (blob.repaired()) repaired++;
+            if (blob.unoptimized()) unoptimized++;
+            if (!blob.unoptimized()) nextEntries.put(result.location(), blob.entry());
             preparedResources.put(result.location(), blob.path());
             if (result.cacheHit()) {
                 cacheHits++;
@@ -93,9 +97,7 @@ public final class StructureCacheBuilder {
             }
         }
 
-        if (vanillaFallbacks == 0) {
-            commitIndexAndPrune(new CacheIndex(identity, nextEntries), Set.copyOf(preparedResources.values()));
-        }
+        commitIndexAndPrune(new CacheIndex(identity, nextEntries), Set.copyOf(preparedResources.values()));
         ResourceResult slowest = results.stream().max(Comparator.comparingLong(ResourceResult::elapsedNanos)).orElse(null);
         CacheBuildStats stats = new CacheBuildStats(
             listed.size(),
@@ -104,7 +106,8 @@ public final class StructureCacheBuilder {
             cacheHits,
             vanillaFallbacks,
             TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos),
-            slowest == null ? "none" : slowest.location().toString()
+            slowest == null ? "none" : slowest.location(),
+            repaired, unoptimized, previousIndex.state()
         );
         return new CacheSnapshot(identity, preparedResources, stats);
     }
@@ -167,7 +170,7 @@ public final class StructureCacheBuilder {
         try {
             sourceBytes = readBounded(resource);
         } catch (IOException | RuntimeException exception) {
-            LOGGER.warn("Cannot capture structure {}; the complete flattened overlay is disabled: {}", location, rootMessage(exception));
+            LOGGER.warn("Cannot capture structure {}; this structure will use vanilla loading: {}", location, rootMessage(exception));
             return ResourceResult.vanillaFallback(location, elapsedSince(startedNanos));
         }
 
@@ -186,7 +189,7 @@ public final class StructureCacheBuilder {
             if (exception.getCause() instanceof Error error) {
                 throw error;
             }
-            LOGGER.warn("Cannot prepare structure {}; the complete flattened overlay is disabled: {}", location, rootMessage(exception));
+            LOGGER.warn("Cannot prepare structure {}; this structure will use vanilla loading: {}", location, rootMessage(exception));
             return ResourceResult.vanillaFallback(location, elapsedSince(startedNanos));
         }
     }
@@ -197,11 +200,14 @@ public final class StructureCacheBuilder {
             Path blob = cacheRoot.resolve(expectedPath);
             if (previous.blobPath().equals(expectedPath) && Files.isRegularFile(blob, LinkOption.NOFOLLOW_LINKS)
                 && previous.blobDigest().equals(CacheKey.sha256(blob))) {
-                return new PreparedBlob(previous, blob, true);
+                return new PreparedBlob(previous, blob, true, false, false);
             }
         }
+        boolean repaired = previous != null && previous.digest().equals(key.digest());
+        if (repaired) LOGGER.warn("Rebuilding missing or damaged cached structure {}", location);
         // No valid index means existing files are untrusted and must be replaced.
         CompoundTag converted = null;
+        boolean unoptimized = false;
         try {
             CompoundTag original = readCompressed(sourceBytes, MAX_DECODED_NBT_BYTES);
             int sourceVersion = NbtUtils.getDataVersion(original, MISSING_DATA_VERSION);
@@ -214,24 +220,39 @@ public final class StructureCacheBuilder {
             }
         } catch (IOException | RuntimeException exception) {
             converted = null;
+            unoptimized = true;
             LOGGER.warn("Cannot optimize structure {}; preserving its exact vanilla bytes: {}", location, rootMessage(exception));
         }
-        // Disk failure must disable this generation, not masquerade as a DFU failure.
+        // Only verified successful preparation is indexed; temporary DFU failures retry on reload.
         boolean upgraded = converted != null;
         String relativePath = upgraded ? key.convertedBlobRelativePath() : key.sourceBlobRelativePath();
         Path blob = cacheRoot.resolve(relativePath);
         String digest = upgraded ? writeTag(blob, converted) : CacheFiles.write(blob, output -> output.write(sourceBytes));
-        return new PreparedBlob(new CacheEntry(key.digest(), digest, relativePath, upgraded), blob, false);
+        return new PreparedBlob(new CacheEntry(key.digest(), digest, relativePath, upgraded), blob, false, repaired, unoptimized);
     }
 
-    private Optional<CacheIndex> readPreviousIndex(CacheIdentity identity) {
+    private PreviousIndex readPreviousIndex(CacheIdentity identity) {
         try {
-            return CacheIndexStore.read(cacheRoot.resolve("index.json")).filter(index -> index.identity().equals(identity));
+            var read = CacheIndexStore.inspect(cacheRoot.resolve("index.json"));
+            return switch (read.state()) {
+                case MISSING -> new PreviousIndex(Map.of(), CacheBuildStats.IndexState.NEW);
+                case FORMAT_CHANGED -> new PreviousIndex(Map.of(), CacheBuildStats.IndexState.FORMAT_CHANGED);
+                case DAMAGED -> recoveredIndex("invalid index contents");
+                case VALID -> read.index().identity().equals(identity)
+                    ? new PreviousIndex(read.index().entries(), CacheBuildStats.IndexState.REUSED)
+                    : new PreviousIndex(Map.of(), CacheBuildStats.IndexState.VERSION_CHANGED);
+            };
         } catch (IOException | RuntimeException exception) {
-            LOGGER.warn("Ignoring unreadable structure DFU cache index: {}", rootMessage(exception));
-            return Optional.empty();
+            return recoveredIndex(rootMessage(exception));
         }
     }
+
+    private PreviousIndex recoveredIndex(String reason) {
+        LOGGER.warn("Structure cache index will be rebuilt: {}", reason);
+        return new PreviousIndex(Map.of(), CacheBuildStats.IndexState.RECOVERED);
+    }
+
+    private record PreviousIndex(Map<String, CacheEntry> entries, CacheBuildStats.IndexState state) { }
 
     private void commitIndexAndPrune(CacheIndex index, Set<Path> retained) {
         try {
@@ -324,7 +345,7 @@ public final class StructureCacheBuilder {
         }
     }
 
-    private record PreparedBlob(CacheEntry entry, Path path, boolean cacheHit) {
+    private record PreparedBlob(CacheEntry entry, Path path, boolean cacheHit, boolean repaired, boolean unoptimized) {
     }
 
     private record ResourceResult(String location, PreparedBlob blob, long elapsedNanos, boolean cacheHit) {

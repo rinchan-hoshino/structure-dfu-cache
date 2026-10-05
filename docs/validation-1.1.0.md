@@ -17,7 +17,7 @@ dependency. The same `src/main/java` implements the cache for all eight profiles
 
 Each profile passed:
 
-- 30 cache tests and 3 RinLib structure adapter tests.
+- 34 cache tests and 4 RinLib structure adapter tests.
 - Preparation before server readiness; old `grass_path` upgrades to `dirt_path`.
 - Placement of block data, a chest retaining its loot table, and an armor stand.
 - A resource reload that reuses every prepared structure without another DFU conversion.
@@ -25,6 +25,13 @@ Each profile passed:
 - Clean shutdown with no remaining generated resource layers.
 - Restart with complete persistent cache hits and successful template placement.
 - Loader rejection of missing RinLib before world startup.
+
+Every profile additionally injected a single blob storage failure and verified that
+other structures stayed cached while the affected template loaded through vanilla.
+Actual offline test players verified no notice for ordinary players, one notice per
+operator login and reconnect, and no notice after healthy reload. Indexed blob
+corruption and malformed indexes were repaired with operator notices on all eight
+profiles. Temporary DFU conversion failures retry on subsequent preparation.
 
 Additional real-server checks on 1.20.1 Forge and 26.2 NeoForge removed the index
 and damaged a cached converted blob. Both rebuilt it from the resolved original
@@ -45,5 +52,5 @@ they do not establish a numerical TPS gain for a particular modpack.
 `output/release/manifest.json` records the shared core source fingerprint, exact
 artifact hashes, test totals and runtime checks. `output/release/validation/`
 contains server logs and result JSON. The workspace's `work/build-matrix.py`,
-`runtime-check.py`, `missing-dependency-check.py` and `corrupt-cache-check.py`
+`runtime-check.py`, `fault-login-check.py`, `missing-dependency-check.py` and `corrupt-cache-check.py`
 contain the build commands and fixtures used for this run.

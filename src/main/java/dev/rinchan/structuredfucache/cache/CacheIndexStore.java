@@ -16,15 +16,25 @@ public final class CacheIndexStore {
     private CacheIndexStore() {
     }
 
+    public enum ReadState { MISSING, VALID, FORMAT_CHANGED, DAMAGED }
+    public record ReadResult(CacheIndex index, ReadState state) { }
+
     public static Optional<CacheIndex> read(Path indexPath) throws IOException {
-        if (!Files.isRegularFile(indexPath)) {
-            return Optional.empty();
-        }
-        // Record constructors validate both the index and its nested entries.
+        return Optional.ofNullable(inspect(indexPath).index());
+    }
+
+    public static ReadResult inspect(Path indexPath) throws IOException {
+        if (!Files.isRegularFile(indexPath)) return new ReadResult(null, ReadState.MISSING);
         try (Reader reader = Files.newBufferedReader(indexPath, StandardCharsets.UTF_8)) {
-            return Optional.ofNullable(GSON.fromJson(reader, CacheIndex.class));
+            var json = com.google.gson.JsonParser.parseReader(reader).getAsJsonObject();
+            int format = json.getAsJsonObject("identity").get("formatVersion").getAsInt();
+            if (format > 0 && format != CacheIdentity.CURRENT_FORMAT) {
+                return new ReadResult(null, ReadState.FORMAT_CHANGED);
+            }
+            CacheIndex index = GSON.fromJson(json, CacheIndex.class);
+            return new ReadResult(index, index == null ? ReadState.DAMAGED : ReadState.VALID);
         } catch (RuntimeException exception) {
-            return Optional.empty();
+            return new ReadResult(null, ReadState.DAMAGED);
         }
     }
 

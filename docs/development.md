@@ -29,16 +29,24 @@ The cache hashes effective bytes, verifies indexed blob checksums, and upgrades 
 structure tags through `DataFixTypes.STRUCTURE`. Source and converted bytes are
 persisted in content-addressed files.
 
-A complete generation is materialized as a vanilla directory pack. Atomic blob
+Successful entries are materialized as a vanilla directory pack; individual failures
+delegate to their already-resolved vanilla resources in the same layer. Atomic blob
 replacement keeps older hard-linked generations readable during reload. The
 current and preceding generation remain available until a later reload; stopping
 the server closes them. Persistent files are reused on the next launch.
 
 The cache identity includes its format, target DataVersion, game version and loader
 version. Missing or invalid indexes never make an existing blob trustworthy.
-An uncapturable resource or failed cache commit leaves the original resource
-manager active for the whole generation. Malformed or unconvertible NBT keeps its
-original bytes for Minecraft to handle.
+Individual read, write or materialization failures delegate only that structure to
+its original resource. A cache-root, lock, generation metadata or index commit
+failure leaves the original manager active for the whole generation. Malformed or
+unconvertible NBT retains its exact original bytes and is retried on the next
+preparation rather than indexed as a successful result.
+
+Every preparation logs a console summary. Normal format, runtime or data-pack
+updates are informational. Repairs, unoptimized resources and vanilla fallbacks
+also produce a current-generation notice delivered once to operators on each
+login. Ordinary players receive nothing; a healthy preparation clears the notice.
 
 All workers finish during preparation. Ordinary structure reads use vanilla
 resource classes without a mod-owned gameplay worker.

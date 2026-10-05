@@ -10,6 +10,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.packs.resources.Resource;
 import java.util.UUID;
 import dev.rinchan.rinlib.minecraft.StructureLifecycle;
 import dev.rinchan.rinlib.minecraft.StructureResources;
@@ -24,7 +28,7 @@ public final class StructureCacheBootstrap implements StructureLifecycle.Prepara
     private static final int MAX_WORKERS = 4;
     private final Path cacheRoot;
     private final CacheIdentity identity;
-    private PreparedStructureResources current;
+    private volatile PreparedStructureResources current;
     private PreparedStructureResources previous;
 
     public StructureCacheBootstrap(Path cacheRoot, String loaderVersion) {
@@ -40,6 +44,12 @@ public final class StructureCacheBootstrap implements StructureLifecycle.Prepara
         previous = current;
         current = prepared;
         return prepared.resourceManager();
+    }
+
+    @Override
+    public Component operatorNotice() {
+        var prepared = current;
+        return prepared == null ? null : prepared.operatorNotice();
     }
 
     @Override
@@ -67,18 +77,21 @@ public final class StructureCacheBootstrap implements StructureLifecycle.Prepara
                 if (lock == null) {
                     throw new CacheBuildException("Cache is being prepared by another process");
                 }
-                CacheSnapshot snapshot = new StructureCacheBuilder(dataFixer, cacheRoot, workers).build(StructureResources.list(original), identity);
+                var resolved = StructureResources.list(original);
+                CacheSnapshot snapshot = new StructureCacheBuilder(dataFixer, cacheRoot, workers).build(resolved, identity);
                 CacheBuildStats stats = snapshot.stats();
-                if (stats.totalResources() == 0 || stats.vanillaFallbacks() > 0
-                    || snapshot.preparedResources().size() != stats.totalResources()) {
-                    logReady(stats, workers, "vanilla resources");
-                    return new PreparedStructureResources(original, null);
+                if (stats.totalResources() == 0) {
+                    logReady(stats, workers, 0, "vanilla resources");
+                    return new PreparedStructureResources(original, null, null);
                 }
-
-                generation = materializeOverlay(cacheRoot, snapshot);
-                ResourceManager prepared = StructureResources.overlay(generation, StructureDfuCache.MOD_ID + "_generated");
-                logReady(stats, workers, generation.toString());
-                return new PreparedStructureResources(prepared, generation);
+                var delegated = new HashMap<String, Resource>();
+                resolved.forEach((key, resource) -> {
+                    if (!snapshot.preparedResources().containsKey(key)) delegated.put(key, resource);
+                });
+                generation = materializeOverlay(cacheRoot, snapshot, resolved, delegated);
+                ResourceManager prepared = StructureResources.overlay(generation, StructureDfuCache.MOD_ID + "_generated", delegated);
+                logReady(stats, workers, delegated.size(), generation.toString());
+                return new PreparedStructureResources(prepared, generation, notice(stats, delegated.size()));
             }
         } catch (IOException | RuntimeException exception) {
             deleteTree(generation);
@@ -86,7 +99,8 @@ public final class StructureCacheBootstrap implements StructureLifecycle.Prepara
                 "Structure DFU cache disabled for this resource generation; vanilla structure loading remains active: {}",
                 rootMessage(exception)
             );
-            return new PreparedStructureResources(original, null);
+            return new PreparedStructureResources(original, null, Component.literal(
+                "[Structure DFU Cache] Cache unavailable; all structures use vanilla loading. See server console: " + rootMessage(exception)));
         }
     }
 
@@ -105,6 +119,12 @@ public final class StructureCacheBootstrap implements StructureLifecycle.Prepara
     }
 
     static Path materializeOverlay(Path cacheRoot, CacheSnapshot snapshot) {
+        return materializeOverlay(cacheRoot, snapshot, Map.of(), new HashMap<>());
+    }
+
+    static Path materializeOverlay(Path cacheRoot, CacheSnapshot snapshot,
+        Map<String, Resource> resolved,
+        Map<String, Resource> delegated) {
         Path generations = cacheRoot.resolve("generations");
         Path temporary = generations.resolve(".tmp-" + UUID.randomUUID());
         Path completed = generations.resolve(UUID.randomUUID().toString());
@@ -112,8 +132,21 @@ public final class StructureCacheBootstrap implements StructureLifecycle.Prepara
             Files.createDirectories(temporary.resolve("data"));
             for (var entry : snapshot.preparedResources().entrySet()) {
                 Path target = StructureResources.resourcePath(temporary, entry.getKey());
-                Files.createDirectories(target.getParent());
-                linkOrCopy(entry.getValue(), target);
+                try {
+                    Files.createDirectories(target.getParent());
+                    linkOrCopy(entry.getValue(), target);
+                } catch (IOException | RuntimeException exception) {
+                    var resource = resolved.get(entry.getKey());
+                    if (resource == null) throw exception;
+                    try {
+                        Files.deleteIfExists(target);
+                    } catch (IOException cleanupFailure) {
+                        exception.addSuppressed(cleanupFailure);
+                    }
+                    delegated.put(entry.getKey(), resource);
+                    LOGGER.warn("Cannot materialize cached structure {}; this structure will use vanilla loading: {}",
+                        entry.getKey(), rootMessage(exception));
+                }
             }
             Files.writeString(temporary.resolve("pack.mcmeta"), StructureResources.packMetadata());
             try {
@@ -149,19 +182,21 @@ public final class StructureCacheBootstrap implements StructureLifecycle.Prepara
         }
     }
 
-    private static void logReady(CacheBuildStats stats, int workers, String resourceLayer) {
-        LOGGER.info(
-            "Structure DFU cache prepared before gameplay: resources={}, converted={}, passthrough={}, cacheHits={}, vanillaFallbacks={}, workers={}, elapsed={} ms, slowest={}, layer={}",
-            stats.totalResources(),
-            stats.converted(),
-            stats.passthrough(),
-            stats.cacheHits(),
-            stats.vanillaFallbacks(),
-            workers,
-            stats.elapsedMillis(),
-            stats.slowestResource(),
-            resourceLayer
-        );
+    private static void logReady(CacheBuildStats stats, int workers, int fallbacks, String resourceLayer) {
+        var event = stats.hasProblems() || fallbacks > 0 ? LOGGER.atWarn() : LOGGER.atInfo();
+        event.log(
+            "Structure DFU cache prepared before gameplay: resources={}, converted={}, passthrough={}, cacheHits={}, vanillaFallbacks={}, repaired={}, unoptimized={}, index={}, workers={}, elapsed={} ms, slowest={}, layer={}",
+            stats.totalResources(), stats.converted(), stats.passthrough(), stats.cacheHits(), fallbacks,
+            stats.repairedResources(), stats.unoptimizedResources(), stats.indexState().description(),
+            workers, stats.elapsedMillis(), stats.slowestResource(), resourceLayer);
+    }
+
+    private static Component notice(CacheBuildStats stats, int fallbacks) {
+        if (!stats.hasProblems() && fallbacks == 0) return null;
+        String index = stats.indexState() == CacheBuildStats.IndexState.RECOVERED ? "A damaged cache index was rebuilt. " : "";
+        return Component.literal("[Structure DFU Cache] " + index
+            + "Cache repairs: " + stats.repairedResources() + "; vanilla fallback: " + fallbacks
+            + "; unoptimized resources: " + stats.unoptimizedResources() + ". See server console for details.");
     }
 
     private static String rootMessage(Throwable throwable) {
@@ -173,7 +208,7 @@ public final class StructureCacheBootstrap implements StructureLifecycle.Prepara
         return current.getClass().getSimpleName() + (message == null ? "" : ": " + message);
     }
 
-    public record PreparedStructureResources(ResourceManager resourceManager, Path generationRoot) implements AutoCloseable {
+    public record PreparedStructureResources(ResourceManager resourceManager, Path generationRoot, Component operatorNotice) implements AutoCloseable {
         public PreparedStructureResources {
             if (resourceManager == null) {
                 throw new IllegalArgumentException("resourceManager must not be null");

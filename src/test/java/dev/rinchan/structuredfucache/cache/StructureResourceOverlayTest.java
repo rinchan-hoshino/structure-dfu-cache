@@ -37,7 +37,7 @@ class StructureResourceOverlayTest {
         CacheSnapshot snapshot = new CacheSnapshot(
             identity,
             Map.of(location, blob),
-            new CacheBuildStats(1, 1, 0, 0, 0, 0L, location)
+            new CacheBuildStats(1, 1, 0, 0, 0, 0L, location, 0, 0, CacheBuildStats.IndexState.NEW)
         );
 
         Path generation = StructureCacheBootstrap.materializeOverlay(temporaryDirectory, snapshot);
@@ -49,7 +49,7 @@ class StructureResourceOverlayTest {
         }
         assertTrue(Files.isRegularFile(generation.resolve("pack.mcmeta")));
 
-        new StructureCacheBootstrap.PreparedStructureResources(manager, generation).close();
+        new StructureCacheBootstrap.PreparedStructureResources(manager, generation, null).close();
         assertFalse(Files.exists(generation));
     }
 
@@ -70,6 +70,7 @@ class StructureResourceOverlayTest {
 
         assertSame(original, prepared.resourceManager());
         assertNull(prepared.generationRoot());
+        assertTrue(prepared.operatorNotice().getString().contains("Cache unavailable"));
     }
 
     @Test
@@ -131,6 +132,51 @@ class StructureResourceOverlayTest {
             }
             first.close();
             second.close();
+        }
+    }
+
+    @Test
+    void failedMaterializationDelegatesOnlyTheMissingBlob() throws Exception {
+        Path healthy = temporaryDirectory.resolve("healthy.nbt");
+        Files.write(healthy, new byte[] {1});
+        String good = "example:" + StructureResources.directory() + "/good.nbt";
+        String bad = "example:" + StructureResources.directory() + "/bad.nbt";
+        var identity = new CacheIdentity(CacheIdentity.CURRENT_FORMAT, 3955, "1.21.1", "21.1.248");
+        var original = new net.minecraft.server.packs.resources.Resource(pack("original", temporaryDirectory),
+            () -> new java.io.ByteArrayInputStream(new byte[] {2}));
+        var delegated = new java.util.HashMap<String, net.minecraft.server.packs.resources.Resource>();
+        var snapshot = new CacheSnapshot(identity, Map.of(good, healthy, bad, temporaryDirectory.resolve("missing")),
+            new CacheBuildStats(2, 2, 0, 0, 0, 0, "none", 0, 0, CacheBuildStats.IndexState.NEW));
+        Path generation = StructureCacheBootstrap.materializeOverlay(temporaryDirectory.resolve("cache"), snapshot,
+            Map.of(bad, original), delegated);
+        try (var manager = StructureResources.overlay(generation, "prepared", delegated)) {
+            assertEquals(java.util.Set.of(good, bad), StructureResources.list(manager).keySet());
+            try (var input = StructureResources.list(manager).get(bad).open()) {
+                assertArrayEquals(new byte[] {2}, input.readAllBytes());
+            }
+        }
+        assertEquals(java.util.Set.of(bad), delegated.keySet());
+    }
+
+    @Test
+    void repairedIndexNoticeClearsAfterHealthyPreparation() throws Exception {
+        Path cache = temporaryDirectory.resolve("cache");
+        Files.createDirectories(cache);
+        Files.writeString(cache.resolve("index.json"), "damaged");
+        var identity = new CacheIdentity(CacheIdentity.CURRENT_FORMAT, 3955, "1.21.1", "21.1.248");
+        Path resources = temporaryDirectory.resolve("resources");
+        Path file = StructureResources.resourcePath(resources, "example:" + StructureResources.directory() + "/current.nbt");
+        Files.createDirectories(file.getParent());
+        var tag = new net.minecraft.nbt.CompoundTag();
+        net.minecraft.nbt.NbtUtils.addCurrentDataVersion(tag);
+        try (var output = Files.newOutputStream(file)) { net.minecraft.nbt.NbtIo.writeCompressed(tag, output); }
+        try (var original = new MultiPackResourceManager(PackType.SERVER_DATA, List.of(pack("original", resources)))) {
+            var repaired = StructureCacheBootstrap.prepare(original, DataFixers.getDataFixer(), cache, identity, 1);
+            assertTrue(repaired.operatorNotice().getString().contains("damaged cache index"));
+            repaired.close();
+            var healthy = StructureCacheBootstrap.prepare(original, DataFixers.getDataFixer(), cache, identity, 1);
+            assertNull(healthy.operatorNotice());
+            healthy.close();
         }
     }
 

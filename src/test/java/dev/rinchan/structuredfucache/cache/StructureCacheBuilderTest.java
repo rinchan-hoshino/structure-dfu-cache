@@ -90,6 +90,20 @@ class StructureCacheBuilderTest {
     }
 
     @Test
+    void unreadableResourceDoesNotPreventCommittingHealthyEntries() throws Exception {
+        var pack = packResources();
+        var healthy = new Resource(pack, () -> new ByteArrayInputStream(compressedStructure("healthy")));
+        var broken = new Resource(pack, () -> { throw new IOException("fixture unavailable"); });
+        String bad = "example:" + StructureResources.directory() + "/broken.nbt";
+        var snapshot = builder().build(Map.of(LOCATION, healthy, bad, broken), IDENTITY);
+        assertEquals(1, snapshot.stats().converted());
+        assertEquals(1, snapshot.stats().vanillaFallbacks());
+        assertTrue(Files.isRegularFile(temporaryDirectory.resolve("index.json")));
+        var index = CacheIndexStore.read(temporaryDirectory.resolve("index.json")).orElseThrow();
+        assertEquals(Set.of(LOCATION), index.entries().keySet());
+    }
+
+    @Test
     void tamperedWarmBlobIsRejectedAndRebuilt() throws Exception {
         byte[] original = compressedStructure("integrity");
         StructureCacheBuilder builder = builder();
@@ -101,6 +115,7 @@ class StructureCacheBuilderTest {
 
         assertEquals(0, rebuilt.stats().cacheHits());
         assertEquals(1, rebuilt.stats().converted());
+        assertEquals(1, rebuilt.stats().repairedResources());
         try (var input = Files.newInputStream(rebuilt.preparedResources().get(LOCATION))) {
             CompoundTag actual = StructureResources.readCompressed(input.readAllBytes(), StructureCacheBuilder.MAX_DECODED_NBT_BYTES);
             assertEquals(net.minecraft.nbt.StringTag.valueOf("integrity"), actual.get("author"));
@@ -135,6 +150,7 @@ class StructureCacheBuilderTest {
 
         assertEquals(0, rebuilt.stats().cacheHits());
         assertArrayEquals(original, Files.readAllBytes(rebuilt.preparedResources().get(LOCATION)));
+        assertEquals(CacheBuildStats.IndexState.RECOVERED, rebuilt.stats().indexState());
     }
 
     @Test
@@ -153,6 +169,8 @@ class StructureCacheBuilderTest {
         assertEquals(0, rebuilt.stats().cacheHits());
         assertEquals(1, rebuilt.stats().converted());
         assertNotEquals(first.preparedResources().get(LOCATION), rebuilt.preparedResources().get(LOCATION));
+        assertEquals(CacheBuildStats.IndexState.VERSION_CHANGED, rebuilt.stats().indexState());
+        assertFalse(rebuilt.stats().hasProblems());
     }
 
     @Test
@@ -197,26 +215,6 @@ class StructureCacheBuilderTest {
         assertEquals(1, snapshot.stats().cacheHits());
         assertEquals(snapshot.preparedResources().get(LOCATION), snapshot.preparedResources().get(DUPLICATE_LOCATION));
         assertArrayEquals(original, Files.readAllBytes(snapshot.preparedResources().get(LOCATION)));
-    }
-
-    @Test
-    void oneUnreadableResourcePreventsPartialIndexPublication() {
-        String brokenLocation = "example:" + StructureResources.directory() + "/broken.nbt";
-        Map<String, Resource> resources = Map.of(
-            LOCATION,
-            resource(() -> new ByteArrayInputStream(compressedStructure("readable"))),
-            brokenLocation,
-            resource(() -> {
-                throw new IOException("negative fixture: resource stream cannot be opened");
-            })
-        );
-
-        CacheSnapshot snapshot = builder().build(managerFromResources(resources), IDENTITY);
-
-        assertEquals(1, snapshot.stats().vanillaFallbacks());
-        assertEquals(1, snapshot.preparedResources().size());
-        assertTrue(snapshot.preparedResources().containsKey(LOCATION));
-        assertFalse(Files.exists(temporaryDirectory.resolve("index.json")));
     }
 
     @Test
@@ -360,7 +358,32 @@ class StructureCacheBuilderTest {
         CacheSnapshot snapshot = builder().build(manager(compressedStructure("disk-failure")), IDENTITY);
         assertEquals(1, snapshot.stats().vanillaFallbacks());
         assertTrue(snapshot.preparedResources().isEmpty());
-        assertFalse(Files.exists(temporaryDirectory.resolve("index.json")));
+        assertTrue(CacheIndexStore.read(temporaryDirectory.resolve("index.json")).orElseThrow().entries().isEmpty());
+    }
+
+    @Test
+    void failedConversionRetriesAfterTheFixerRecovers() throws Exception {
+        byte[] bytes = compressedStructure("retry");
+        var failed = new StructureCacheBuilder(countingFixer(new AtomicInteger(), true), temporaryDirectory, 1)
+            .build(manager(bytes), IDENTITY);
+        assertEquals(1, failed.stats().unoptimizedResources());
+        var recovered = builder().build(manager(bytes), IDENTITY);
+        assertEquals(1, recovered.stats().converted());
+        assertEquals(0, recovered.stats().cacheHits());
+        assertFalse(recovered.stats().hasProblems());
+    }
+
+    @Test
+    void singleBlobWriteFailureKeepsOtherStructuresCached() throws Exception {
+        byte[] good = compressedStructure("healthy");
+        byte[] broken = compressedStructure("write-failure");
+        Path obstruction = temporaryDirectory.resolve(CacheKey.of(broken, IDENTITY).convertedBlobRelativePath());
+        Files.createDirectories(obstruction);
+        var result = builder().build(manager(Map.of(LOCATION, good, DUPLICATE_LOCATION, broken)), IDENTITY);
+        assertEquals(1, result.stats().converted());
+        assertEquals(1, result.stats().vanillaFallbacks());
+        assertEquals(Set.of(LOCATION), CacheIndexStore.read(temporaryDirectory.resolve("index.json")).orElseThrow().entries().keySet());
+        assertEquals(Set.of(LOCATION), result.preparedResources().keySet());
     }
 
     private static DataFixer countingFixer(AtomicInteger conversions, boolean fail) {

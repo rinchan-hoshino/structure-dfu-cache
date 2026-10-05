@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 — 2026-10-05
+
+- Share one cache implementation across Minecraft 1.20.1, 1.21.1, 26.1.2 and 26.2 using RinLib 1.2.0.
+- Add Fabric and Forge/NeoForge builds with a required RinLib dependency.
+- Cache only the structures selected by vanilla resource-pack priority and filters.
+- Isolate individual structure read, conversion, storage and materialization failures; healthy structures remain cached.
+- Summarize cache updates, repaired data and vanilla fallbacks in the server console.
+- Notify operators once when they log in if the current preparation encountered damage or fallback; clear the notice after healthy preparation.
+- Release generated resource layers on reload and shutdown while retaining verified persistent blobs.
+
 ## 1.0.1 — 2026-08-29
 
 - Verify every prepared cache blob against its persisted SHA-256 before reuse.
