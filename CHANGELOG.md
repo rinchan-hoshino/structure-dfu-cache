@@ -1,3 +1,13 @@
+## Structure DFU Cache 1.2.0
+
+### Features & Improvements
+- **TOML configuration**: Added `config/structure_dfu_cache.toml` (loaded on game startup; restart required after editing).
+- **Configurable processing limits**:
+  - `maxDecodedNbtMiB` (default `1024`): Positive integer in MiB tracking the NBT decoder's accounting of in-memory NBT objects and allocation overhead during processing (this does not measure total DFU memory).
+  - `maxCompressedResourceMiB` (default `64`): Positive integer in MiB setting the limit for compressed structure resource size.
+- **Concurrency & memory estimation**: Worker concurrency is budgeted based on available heap after deducting resident memory and a 2 GiB reserve, estimating total DFU memory at roughly 4x `maxDecodedNbtMiB` per worker (capped at 4 threads, leaving 1 CPU core free when more than 1 core is available). Higher quota values reduce worker concurrency to allocate more memory headroom.
+- **Fallback behavior**: Structures exceeding `maxCompressedResourceMiB` bypass startup pre-processing and are handed back to vanilla reading. Structures exceeding `maxDecodedNbtMiB` or failing conversion cache the raw compressed bytes as unoptimized resources to retry during future load or reload.
+
 # Changelog
 
 ## 1.1.0 — 2026-10-05

@@ -12,7 +12,10 @@ version = mod_version + '+' + game
 layout.buildDirectory.set(file("build/profiles/${game}-${loader}"))
 base { archivesName = "structure-dfu-cache-${loader}" }
 java.toolchain.languageVersion = JavaLanguageVersion.of(target.java as int)
-repositories { mavenCentral() }
+repositories {
+    maven { url = 'https://libraries.minecraft.net'; content { includeGroup 'com.mojang' } }
+    mavenCentral()
+}
 sourceSets.main.java.srcDir file("${loader}/src/main/java")
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8'; options.compilerArgs.add('-Xlint:all') }
 tasks.withType(AbstractArchiveTask).configureEach { preserveFileTimestamps = false; reproducibleFileOrder = true }
@@ -22,6 +25,7 @@ def rinlib = providers.gradleProperty('rinlibJar').getOrElse(
     "../rinlib/build/profiles/${game}-${loader}/libs/rinlib-${loader}-1.2.0+${game}${loader == 'forge' ? '-dev' : ''}.jar")
 if (!file(rinlib).isFile()) throw new GradleException("Build RinLib ${game}-${loader} first: ${rinlib}")
 dependencies {
+    implementation 'com.electronwill.night-config:toml:3.8.3'
     if (loader == 'fabric' && !game.startsWith('26.')) modImplementation files(rinlib)
     else implementation files(rinlib)
     testImplementation platform('org.junit:junit-bom:5.10.2')
@@ -29,54 +33,58 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+def metadataTarget = new LinkedHashMap(target)
+def metadataDirectory = layout.buildDirectory.dir('generated/metadata')
+def metaValues = [id: mod_id, name: mod_name, license: mod_license, description: mod_description, authors: mod_authors, artifactVersion: project.version.toString()]
 def metadata = tasks.register('generateModMetadata') {
     inputs.file 'profiles.json'
     inputs.file 'gradle.properties'
     inputs.property 'game', game
     inputs.property 'loader', loader
-    outputs.dir layout.buildDirectory.dir('generated/metadata')
+    inputs.properties(metaValues)
+    outputs.dir metadataDirectory
     doLast {
-        def dest = layout.buildDirectory.dir('generated/metadata').get().asFile
+        def dest = metadataDirectory.get().asFile
         dest.mkdirs()
         if (loader == 'fabric') {
             new File(dest, 'fabric.mod.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([
-                schemaVersion: 1, id: mod_id, version: project.version, name: mod_name,
-                description: mod_description, authors: [mod_authors], license: mod_license,
+                schemaVersion: 1, id: metaValues.id, version: metaValues.artifactVersion, name: metaValues.name,
+                description: metaValues.description, authors: [metaValues.authors], license: metaValues.license,
                 environment: '*', icon: 'icon.png',
                 contact: [sources: 'https://github.com/rinchan-hoshino/structure-dfu-cache',
                           issues: 'https://github.com/rinchan-hoshino/structure-dfu-cache/issues'],
                 entrypoints: [main: ['dev.rinchan.structuredfucache.fabric.StructureDfuCacheFabric']],
-                depends: [fabricloader: ">=${target.fabric_loader_version}", minecraft: game,
-                          java: ">=${target.java}", rinlib: '>=1.2.0']])) + '\n'
+                depends: [fabricloader: ">=${metadataTarget.fabric_loader_version}", minecraft: game,
+                          java: ">=${metadataTarget.java}", rinlib: '>=1.2.0']])) + '\n'
         } else {
             def mandatory = loader == 'forge' ? 'mandatory=true' : 'type="required"'
             def path = new File(dest, loader == 'forge' ? 'META-INF/mods.toml' : 'META-INF/neoforge.mods.toml')
             path.parentFile.mkdirs()
-            def loaderVersion = loader == 'forge' ? target.forge_version : target.neo_version
+            def loaderVersion = loader == 'forge' ? metadataTarget.forge_version : metadataTarget.neo_version
             path.text = """modLoader="javafml"
 loaderVersion="[1,)"
-license="${mod_license}"
+license="${metaValues.license}"
 issueTrackerURL="https://github.com/rinchan-hoshino/structure-dfu-cache/issues"
 [[mods]]
-modId="${mod_id}"
-version="${project.version}"
-displayName="${mod_name}"
-authors="${mod_authors}"
+modId="${metaValues.id}"
+version="${metaValues.artifactVersion}"
+displayName="${metaValues.name}"
+authors="${metaValues.authors}"
 logoFile="icon.png"
-description='''${mod_description}'''
-[[dependencies.${mod_id}]]
+description='''${metaValues.description}'''
+[[dependencies.${metaValues.id}]]
 modId="minecraft"
 ${mandatory}
 versionRange="[${game}]"
 ordering="NONE"
 side="BOTH"
-[[dependencies.${mod_id}]]
+[[dependencies.${metaValues.id}]]
 modId="${loader}"
 ${mandatory}
 versionRange="[${loaderVersion},)"
 ordering="NONE"
 side="BOTH"
-[[dependencies.${mod_id}]]
+[[dependencies.${metaValues.id}]]
 modId="rinlib"
 ${mandatory}
 versionRange="[1.2.0,)"

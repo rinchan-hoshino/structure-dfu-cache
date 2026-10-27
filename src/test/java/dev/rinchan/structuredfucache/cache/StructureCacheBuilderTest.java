@@ -37,6 +37,39 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class StructureCacheBuilderTest {
+    @Test
+    void increasingTomlLimitOptimizesTheSamePreviouslyOversizedStructure() throws Exception {
+        Path configDirectory = temporaryDirectory.resolve("config");
+        Files.createDirectories(configDirectory);
+        Path configFile = configDirectory.resolve("structure_dfu_cache.toml");
+        Files.writeString(configFile,"maxDecodedNbtMiB = 1\nmaxCompressedResourceMiB = 1\n");
+        CompoundTag tag = StructureCacheBuilder.readCompressed(compressedStructure("large"),4L*1024*1024);
+        tag.putByteArray("extra_payload",new byte[2*1024*1024]);
+        var output=new ByteArrayOutputStream();
+        net.minecraft.nbt.NbtIo.writeCompressed(tag,output);
+        byte[] bytes=output.toByteArray();
+        var low=new StructureCacheBuilder(DataFixers.getDataFixer(),temporaryDirectory.resolve("cache"),1,
+            dev.rinchan.structuredfucache.CacheConfig.load(configDirectory)).build(manager(bytes),IDENTITY);
+        assertEquals(1,low.stats().unoptimizedResources());
+        assertArrayEquals(bytes,Files.readAllBytes(low.preparedResources().get(LOCATION)));
+        Files.writeString(configFile,"maxDecodedNbtMiB = 4\nmaxCompressedResourceMiB = 1\n");
+        var high=new StructureCacheBuilder(DataFixers.getDataFixer(),temporaryDirectory.resolve("cache"),1,
+            dev.rinchan.structuredfucache.CacheConfig.load(configDirectory)).build(manager(bytes),IDENTITY);
+        assertEquals(0,high.stats().unoptimizedResources());
+        assertEquals(1,high.stats().converted());
+    }
+
+    @Test
+    void compressedResourceLimitIsAppliedByTheRealBuildPipeline() {
+        byte[] bytes=compressedStructure("input-limit");
+        var low=new StructureCacheBuilder(DataFixers.getDataFixer(),temporaryDirectory.resolve("cache"),1,
+            new dev.rinchan.structuredfucache.CacheConfig(1024*1024,1)).build(manager(bytes),IDENTITY);
+        assertEquals(1,low.stats().vanillaFallbacks());
+        assertTrue(low.preparedResources().isEmpty());
+        var high=new StructureCacheBuilder(DataFixers.getDataFixer(),temporaryDirectory.resolve("cache"),1,
+            new dev.rinchan.structuredfucache.CacheConfig(1024*1024,1024*1024)).build(manager(bytes),IDENTITY);
+        assertEquals(1,high.stats().converted());
+    }
     private static final int TARGET_DATA_VERSION = detectVersion();
     private static int detectVersion() {
         net.minecraft.SharedConstants.tryDetectVersion();
@@ -239,7 +272,8 @@ class StructureCacheBuilderTest {
             }
         };
 
-        assertArrayEquals(new byte[] {1, 2, 3}, StructureCacheBuilder.readBounded(resource(() -> input)));
+        var snapshot = builder().build(Map.of(LOCATION, resource(() -> input)), IDENTITY);
+        assertArrayEquals(new byte[] {1, 2, 3}, Files.readAllBytes(snapshot.preparedResources().get(LOCATION)));
         assertTrue(closed.get());
     }
 

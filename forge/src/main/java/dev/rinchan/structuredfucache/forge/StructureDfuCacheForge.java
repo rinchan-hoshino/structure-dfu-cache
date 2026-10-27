@@ -7,8 +7,8 @@ import net.minecraftforge.fml.loading.FMLPaths;
 
 @Mod(StructureDfuCache.MOD_ID)
 public final class StructureDfuCacheForge {
-    public StructureDfuCacheForge() {
+    public StructureDfuCacheForge() throws java.io.IOException {
         String version = ModList.get().getModContainerById("forge").orElseThrow().getModInfo().getVersion().toString();
-        StructureDfuCache.initialize(FMLPaths.GAMEDIR.get(), "forge:" + version);
+        StructureDfuCache.initialize(FMLPaths.GAMEDIR.get(), FMLPaths.CONFIGDIR.get(), "forge:" + version);
     }
 }

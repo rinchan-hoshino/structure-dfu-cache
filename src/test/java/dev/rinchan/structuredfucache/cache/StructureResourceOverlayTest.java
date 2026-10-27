@@ -77,10 +77,13 @@ class StructureResourceOverlayTest {
     void workerCountReservesHeapAndLeavesOneProcessorFree() {
         long gibibyte = 1024L * 1024L * 1024L;
         assertEquals(1, StructureCacheBootstrap.workerThreadsFor(3L * gibibyte, 8));
-        assertEquals(4, StructureCacheBootstrap.workerThreadsFor(9L * gibibyte, 8));
+        assertEquals(1, StructureCacheBootstrap.workerThreadsFor(9L * gibibyte, 8));
         assertEquals(1, StructureCacheBootstrap.workerThreadsFor(9L * gibibyte, 2));
         assertEquals(4, StructureCacheBootstrap.workerThreadsFor(Long.MAX_VALUE, 8));
         assertEquals(1, StructureCacheBootstrap.workerThreadsFor(1, 1));
+        assertEquals(3, StructureCacheBootstrap.workerThreadsFor(15L * gibibyte, 8));
+        assertEquals(1, StructureCacheBootstrap.workerThreadsFor(15L * gibibyte, 8,
+            new dev.rinchan.structuredfucache.CacheConfig(2L*gibibyte,64*1024*1024)));
     }
 
     @Test

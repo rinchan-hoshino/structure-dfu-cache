@@ -1,6 +1,8 @@
 plugins { id 'fabric-loom' version '1.14.7' }
 apply from: rootProject.file('profiles/common.gradle')
 dependencies {
+    include 'com.electronwill.night-config:core:3.8.3'
+    include 'com.electronwill.night-config:toml:3.8.3'
     minecraft "com.mojang:minecraft:${target.minecraft}"
     mappings loom.officialMojangMappings()
     modImplementation "net.fabricmc:fabric-loader:${target.fabric_loader_version}"

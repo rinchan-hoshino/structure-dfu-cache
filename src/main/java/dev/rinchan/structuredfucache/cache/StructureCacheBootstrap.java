@@ -3,6 +3,7 @@ package dev.rinchan.structuredfucache.cache;
 import com.mojang.datafixers.DataFixer;
 import com.mojang.logging.LogUtils;
 import dev.rinchan.structuredfucache.StructureDfuCache;
+import dev.rinchan.structuredfucache.CacheConfig;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
@@ -24,22 +25,30 @@ import org.slf4j.Logger;
 public final class StructureCacheBootstrap implements StructureLifecycle.Preparation {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final long RESERVED_HEAP_BYTES = 2L * 1024L * 1024L * 1024L;
-    private static final long BYTES_PER_CONVERSION_WORKER = 1024L * 1024L * 1024L;
     private static final int MAX_WORKERS = 4;
     private final Path cacheRoot;
     private final CacheIdentity identity;
+    private final CacheConfig config;
     private volatile PreparedStructureResources current;
     private PreparedStructureResources previous;
 
     public StructureCacheBootstrap(Path cacheRoot, String loaderVersion) {
+        this(cacheRoot, loaderVersion, CacheConfig.defaults());
+    }
+
+    public StructureCacheBootstrap(Path cacheRoot, String loaderVersion, CacheConfig config) {
         this.cacheRoot = cacheRoot;
+        this.config = config;
         this.identity = new CacheIdentity(CacheIdentity.CURRENT_FORMAT, StructureResources.dataVersion(),
             StructureResources.minecraftVersion(), loaderVersion);
     }
 
     @Override
     public ResourceManager prepare(ResourceManager original, DataFixer dataFixer) {
-        var prepared = prepare(original, dataFixer, cacheRoot, identity, adaptiveWorkerThreads());
+        var runtime = Runtime.getRuntime();
+        long availableHeap = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory());
+        var prepared = prepare(original, dataFixer, cacheRoot, identity,
+            workerThreadsFor(availableHeap, runtime.availableProcessors(), config), config);
         if (previous != null) previous.close();
         previous = current;
         current = prepared;
@@ -67,6 +76,11 @@ public final class StructureCacheBootstrap implements StructureLifecycle.Prepara
         CacheIdentity identity,
         int workers
     ) {
+        return prepare(original, dataFixer, cacheRoot, identity, workers, CacheConfig.defaults());
+    }
+
+    static PreparedStructureResources prepare(ResourceManager original, DataFixer dataFixer,
+        Path cacheRoot, CacheIdentity identity, int workers, CacheConfig config) {
         Path generation = null;
         try {
             Files.createDirectories(cacheRoot);
@@ -78,7 +92,7 @@ public final class StructureCacheBootstrap implements StructureLifecycle.Prepara
                     throw new CacheBuildException("Cache is being prepared by another process");
                 }
                 var resolved = StructureResources.list(original);
-                CacheSnapshot snapshot = new StructureCacheBuilder(dataFixer, cacheRoot, workers).build(resolved, identity);
+                CacheSnapshot snapshot = new StructureCacheBuilder(dataFixer, cacheRoot, workers, config).build(resolved, identity);
                 CacheBuildStats stats = snapshot.stats();
                 if (stats.totalResources() == 0) {
                     logReady(stats, workers, 0, "vanilla resources");
@@ -104,17 +118,18 @@ public final class StructureCacheBootstrap implements StructureLifecycle.Prepara
         }
     }
 
-    static int adaptiveWorkerThreads() {
-        return workerThreadsFor(Runtime.getRuntime().maxMemory(), Runtime.getRuntime().availableProcessors());
+    static int workerThreadsFor(long maximumHeapBytes, int availableProcessors) {
+        return workerThreadsFor(maximumHeapBytes, availableProcessors, CacheConfig.defaults());
     }
 
-    static int workerThreadsFor(long maximumHeapBytes, int availableProcessors) {
+    static int workerThreadsFor(long maximumHeapBytes, int availableProcessors, CacheConfig config) {
         if (maximumHeapBytes < 1L || availableProcessors < 1) {
             throw new IllegalArgumentException("heap and processor counts must be positive");
         }
         int cpuBudget = Math.max(1, availableProcessors - 1);
         long conversionHeap = Math.max(0L, maximumHeapBytes - RESERVED_HEAP_BYTES);
-        int heapBudget = (int)Math.min(MAX_WORKERS, Math.max(1L, conversionHeap / BYTES_PER_CONVERSION_WORKER));
+        long bytesPerWorker = Math.multiplyExact(config.maxDecodedNbtBytes(), 4L);
+        int heapBudget = (int)Math.min(MAX_WORKERS, Math.max(1L, conversionHeap / bytesPerWorker));
         return Math.min(MAX_WORKERS, Math.min(cpuBudget, heapBudget));
     }
 

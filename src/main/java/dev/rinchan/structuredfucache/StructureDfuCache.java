@@ -9,8 +9,9 @@ public final class StructureDfuCache {
 
     private StructureDfuCache() { }
 
-    public static void initialize(Path gameDirectory, String loaderVersion) {
+    public static void initialize(Path gameDirectory, Path configDirectory, String loaderVersion) throws java.io.IOException {
         Path cache = gameDirectory.resolve("cache").resolve(MOD_ID);
-        StructureLifecycle.register(() -> new StructureCacheBootstrap(cache, loaderVersion));
+        var config = CacheConfig.load(configDirectory);
+        StructureLifecycle.register(() -> new StructureCacheBootstrap(cache, loaderVersion, config));
     }
 }

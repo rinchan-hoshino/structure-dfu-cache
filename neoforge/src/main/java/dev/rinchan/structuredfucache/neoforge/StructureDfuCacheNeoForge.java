@@ -7,8 +7,8 @@ import net.neoforged.fml.loading.FMLPaths;
 
 @Mod(StructureDfuCache.MOD_ID)
 public final class StructureDfuCacheNeoForge {
-    public StructureDfuCacheNeoForge() {
+    public StructureDfuCacheNeoForge() throws java.io.IOException {
         String version = ModList.get().getModContainerById("neoforge").orElseThrow().getModInfo().getVersion().toString();
-        StructureDfuCache.initialize(FMLPaths.GAMEDIR.get(), "neoforge:" + version);
+        StructureDfuCache.initialize(FMLPaths.GAMEDIR.get(), FMLPaths.CONFIGDIR.get(), "neoforge:" + version);
     }
 }

@@ -1,6 +1,7 @@
 package dev.rinchan.structuredfucache.cache;
 
 import com.mojang.datafixers.DataFixer;
+import dev.rinchan.structuredfucache.CacheConfig;
 import com.mojang.logging.LogUtils;
 import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
@@ -38,7 +39,7 @@ import net.minecraft.util.datafix.DataFixTypes;
 import org.slf4j.Logger;
 
 public final class StructureCacheBuilder {
-    static final long MAX_DECODED_NBT_BYTES = 256L * 1024L * 1024L;
+    static final long MAX_DECODED_NBT_BYTES = CacheConfig.defaults().maxDecodedNbtBytes();
     static final int MAX_COMPRESSED_RESOURCE_BYTES = 64 * 1024 * 1024;
 
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -47,8 +48,13 @@ public final class StructureCacheBuilder {
     private final DataFixer dataFixer;
     private final Path cacheRoot;
     private final int workerThreads;
+    private final CacheConfig config;
 
     public StructureCacheBuilder(DataFixer dataFixer, Path cacheRoot, int workerThreads) {
+        this(dataFixer, cacheRoot, workerThreads, CacheConfig.defaults());
+    }
+
+    public StructureCacheBuilder(DataFixer dataFixer, Path cacheRoot, int workerThreads, CacheConfig config) {
         if (dataFixer == null) {
             throw new IllegalArgumentException("dataFixer must not be null");
         }
@@ -61,6 +67,7 @@ public final class StructureCacheBuilder {
         this.dataFixer = dataFixer;
         this.cacheRoot = cacheRoot.toAbsolutePath().normalize();
         this.workerThreads = workerThreads;
+        this.config = config;
     }
 
     public CacheSnapshot build(Map<String, Resource> resources, CacheIdentity identity) {
@@ -167,8 +174,8 @@ public final class StructureCacheBuilder {
     ) {
         long startedNanos = System.nanoTime();
         byte[] sourceBytes;
-        try {
-            sourceBytes = readBounded(resource);
+        try (InputStream input = resource.open()) {
+            sourceBytes = readBounded(input, config.maxCompressedResourceBytes());
         } catch (IOException | RuntimeException exception) {
             LOGGER.warn("Cannot capture structure {}; this structure will use vanilla loading: {}", location, rootMessage(exception));
             return ResourceResult.vanillaFallback(location, elapsedSince(startedNanos));
@@ -209,7 +216,7 @@ public final class StructureCacheBuilder {
         CompoundTag converted = null;
         boolean unoptimized = false;
         try {
-            CompoundTag original = readCompressed(sourceBytes, MAX_DECODED_NBT_BYTES);
+            CompoundTag original = readCompressed(sourceBytes, config.maxDecodedNbtBytes());
             int sourceVersion = NbtUtils.getDataVersion(original, MISSING_DATA_VERSION);
             if (isStructureTemplate(original) && sourceVersion < key.identity().targetDataVersion()) {
                 converted = DataFixTypes.STRUCTURE.update(dataFixer, original, sourceVersion, key.identity().targetDataVersion());
@@ -280,12 +287,6 @@ public final class StructureCacheBuilder {
         }
         if (removed > 0L) {
             LOGGER.info("Pruned {} unreferenced structure DFU cache blobs under {}", removed, root.getFileName());
-        }
-    }
-
-    static byte[] readBounded(Resource resource) throws IOException {
-        try (InputStream input = resource.open()) {
-            return readBounded(input, MAX_COMPRESSED_RESOURCE_BYTES);
         }
     }
 

@@ -8,6 +8,10 @@ public final class StructureDfuCacheFabric implements ModInitializer {
     @Override public void onInitialize() {
         var loader = FabricLoader.getInstance();
         String version = loader.getModContainer("fabricloader").orElseThrow().getMetadata().getVersion().getFriendlyString();
-        StructureDfuCache.initialize(loader.getGameDir(), "fabric:" + version);
+        try {
+            StructureDfuCache.initialize(loader.getGameDir(), loader.getConfigDir(), "fabric:" + version);
+        } catch (java.io.IOException failure) {
+            throw new java.io.UncheckedIOException(failure);
+        }
     }
 }
