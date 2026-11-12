@@ -174,7 +174,7 @@ public final class StructureCacheBootstrap {
     }
 
     private static void logReady(CacheBuildStats stats, int workers, String resourceLayer) {
-        LOGGER.info(
+        LOGGER.debug(
             "Structure DFU cache prepared before gameplay: resources={}, converted={}, passthrough={}, cacheHits={}, vanillaFallbacks={}, workers={}, elapsed={} ms, slowest={}, layer={}",
             stats.totalResources(),
             stats.converted(),

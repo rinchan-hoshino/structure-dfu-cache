@@ -1,2 +1,0 @@
-JDK jcmd Thread.print, local development server PID 33022, after completed resource preparation.
-Observed cache worker threads: 0.

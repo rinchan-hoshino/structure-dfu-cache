@@ -248,7 +248,7 @@ public final class StructureCacheBuilder {
             LOGGER.warn("Unable to fully prune unreferenced structure DFU cache blobs: {}", rootMessage(exception));
         }
         if (removed > 0L) {
-            LOGGER.info("Pruned {} unreferenced structure DFU cache blobs under {}", removed, root.getFileName());
+            LOGGER.debug("Pruned {} unreferenced structure DFU cache blobs under {}", removed, root.getFileName());
         }
     }
 

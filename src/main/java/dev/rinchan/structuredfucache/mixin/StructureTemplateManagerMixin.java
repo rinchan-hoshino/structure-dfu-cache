@@ -13,6 +13,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+// RETURN of the constructor and onResourceManagerReload: vanilla has built its resource view by then, so the cache layer wraps the finished result.
 @Mixin(StructureTemplateManager.class)
 abstract class StructureTemplateManagerMixin {
     @Shadow
