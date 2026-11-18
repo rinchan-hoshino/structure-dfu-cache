@@ -36,24 +36,29 @@ public final class PackFingerprint {
         }
 
         update(digest, "modlist");
+        Path normalizedGameDir = gameDir != null ? gameDir.toAbsolutePath().normalize() : null;
         try {
             ModList modList = ModList.get();
             if (modList != null) {
-                List<Path> modPaths = new ArrayList<>();
+                record ModEntry(String key, Path path) {}
+                List<ModEntry> modEntries = new ArrayList<>();
                 for (IModFileInfo info : modList.getModFiles()) {
-                    modPaths.add(info.getFile().getFilePath().toAbsolutePath().normalize());
+                    Path path = info.getFile().getFilePath().toAbsolutePath().normalize();
+                    String key = (normalizedGameDir != null && path.startsWith(normalizedGameDir))
+                        ? normalizedGameDir.relativize(path).toString()
+                        : path.getFileName().toString();
+                    modEntries.add(new ModEntry(key, path));
                 }
-                modPaths.sort(Comparator.comparing(Path::toString));
-                for (Path path : modPaths) {
-                    feedFileStat(digest, path.toString(), path);
+                modEntries.sort(Comparator.comparing(ModEntry::key));
+                for (ModEntry entry : modEntries) {
+                    feedFileStat(digest, entry.key(), entry.path());
                 }
             }
         } catch (Throwable ignored) {
             // Unit tests without full FML ModList initialization continue with pack + gameDir stats.
         }
 
-        if (gameDir != null) {
-            Path normalizedGameDir = gameDir.toAbsolutePath().normalize();
+        if (normalizedGameDir != null) {
             feedDirectoryStats(digest, "mods", normalizedGameDir.resolve("mods"), ".jar");
             feedDirectoryStats(digest, "datapacks", normalizedGameDir.resolve("datapacks"), null);
             feedDirectoryStats(digest, "world_datapacks", normalizedGameDir.resolve("world/datapacks"), null);
