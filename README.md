@@ -4,11 +4,10 @@ Reduce repeated structure DataFixerUpper work during startup and `/reload` by ca
 
 ## How it works
 
-- Resolves the server's structure resources once during startup or reload.
-- Hashes the source bytes and the relevant DataFixer context of each structure.
-- Reuses validated converted NBT from a persistent cache.
-- Serves the result through one vanilla-compatible resource pack layer.
-- If any entry is missing, ambiguous or invalid, the cache refuses to publish and vanilla behaviour is used. There is no gameplay-tick worker.
+- Validates a single-line `manifest.v2` header against the current pack stack, mod files, and datapack metadata (`PackFingerprint`) for a sub-5ms zero-read warm-boot mount.
+- On cold start or pack changes, scans `structure/*.nbt` once and writes only structures with `DataVersion < targetDataVersion` into a single `overlay/data/<namespace>/<path>` layer.
+- Current-version, non-template, corrupt, or oversized structures are recorded as `P` (passthrough) in `manifest.v2` with zero bytes written to disk and are not re-decoded on subsequent runs.
+- Serves upgraded structures via a lightweight `StructureOverlayResourceManager` wrapper, automatically unwrapping across `/reload` and cleaning up legacy `1.x` cache directories.
 
 ## Configuration
 
@@ -17,8 +16,8 @@ There is no configuration file. Drop the jar into a pack or server. Removing the
 | Limit | Value |
 | --- | --- |
 | Compressed input per structure | 64 MiB |
-| Decoded NBT per structure | 256 MiB (not a total heap cap) |
-| Preparation workers | 1 to 4, based on CPU count and heap |
+| Decoded NBT per structure | 32 MiB (`NbtAccounter` cap) |
+| Preparation workers | 1 (when `-Xmx <= 6.8G` or headroom `< 2.5G`), otherwise 2 to 4 |
 
 ## Compatibility
 

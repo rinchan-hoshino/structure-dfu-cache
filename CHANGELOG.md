@@ -1,13 +1,11 @@
 # Changelog
 
-## Unreleased
+## 2.0.0
 
-- Rebuild unverified cache files when an index is missing, corrupt, or points to an unexpected path.
-- Share conversion and warm-cache validation per content key. Compute blob digests while writing instead of rereading files; skip unused source copies after successful conversion.
-- Use one file-commit implementation for blobs and indexes, preserving active generations' hard links. Keep index serialization deterministic.
-- Scope workers to preparation and wait for them to terminate on interruption. Use a nonblocking cache-directory lock to isolate competing preparations.
-- Simplify startup and reload integration to one post-vanilla Mixin hook. Keep the complete single-pack resource layer and vanilla fallback.
-- Report passthrough resources accurately in logs, correct compatibility documentation and issue-tracker metadata, and test cold/warm startup, reload, fallback, recovery and clean shutdown on a local NeoForge server.
+- Replace `blobs/`, `sources/`, `generations/<uuid>`, and `index.json` with a single `overlay/data/<ns>/<path>` layer and streaming `manifest.v2` line format.
+- Add sub-5ms warm-boot fast-path mounting by checking only line 1 of `manifest.v2` against `PackFingerprint` (zero structure file reads or NBT decoding).
+- Only materialize structures with `DataVersion < targetDataVersion`; record current-version, non-template, corrupt, and oversized (`>32 MiB` decoded) NBT as `P` with zero disk writes.
+- Force single-threaded streaming conversion with immediate buffer release on `<=6.8G` heaps, drop per-file `fsync`, and auto-clean legacy `1.x` cache directories.
 
 ## 1.0.1
 

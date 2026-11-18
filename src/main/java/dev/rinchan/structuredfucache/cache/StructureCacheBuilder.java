@@ -12,22 +12,23 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.util.ArrayList;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.List;
+import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.CompletionService;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.FutureTask;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.Deflater;
 import java.util.zip.GZIPOutputStream;
 import net.minecraft.nbt.CompoundTag;
@@ -41,239 +42,273 @@ import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.datafix.DataFixTypes;
 import org.slf4j.Logger;
 
+/**
+ * Streaming single-layer cache builder: upgrades only structure templates older than
+ * targetDataVersion into overlay/data/<ns>/<path>, recording passthrough and unparseable
+ * entries as P in manifest.v2 with zero bytes written to disk.
+ */
 public final class StructureCacheBuilder {
-    static final long MAX_DECODED_NBT_BYTES = 256L * 1024L * 1024L;
     static final int MAX_COMPRESSED_RESOURCE_BYTES = 64 * 1024 * 1024;
+    static final long MAX_DECODED_NBT_BYTES = 32L * 1024L * 1024L;
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MISSING_DATA_VERSION = 500;
 
     private final DataFixer dataFixer;
     private final Path cacheRoot;
-    private final int workerThreads;
+    private final Path overlayDataDir;
+    private final int workers;
 
-    public StructureCacheBuilder(DataFixer dataFixer, Path cacheRoot, int workerThreads) {
-        if (dataFixer == null) {
-            throw new IllegalArgumentException("dataFixer must not be null");
+    public record BuildSummary(int total, int converted, int passthrough, int cacheHits, int skippedBad, long elapsedMs) {
+    }
+
+    public StructureCacheBuilder(DataFixer dataFixer, Path cacheRoot) {
+        this(dataFixer, cacheRoot, adaptiveWorkers());
+    }
+
+    StructureCacheBuilder(DataFixer dataFixer, Path cacheRoot, int workers) {
+        if (dataFixer == null || cacheRoot == null) {
+            throw new IllegalArgumentException("dataFixer and cacheRoot must not be null");
         }
-        if (cacheRoot == null) {
-            throw new IllegalArgumentException("cacheRoot must not be null");
-        }
-        if (workerThreads < 1) {
-            throw new IllegalArgumentException("workerThreads must be positive");
+        if (workers < 1) {
+            throw new IllegalArgumentException("workers must be positive");
         }
         this.dataFixer = dataFixer;
         this.cacheRoot = cacheRoot.toAbsolutePath().normalize();
-        this.workerThreads = workerThreads;
+        this.overlayDataDir = this.cacheRoot.resolve("overlay").resolve("data");
+        this.workers = workers;
     }
 
-    public CacheSnapshot build(ResourceManager resourceManager, CacheIdentity identity) {
+    public BuildSummary build(ResourceManager resourceManager, CacheManifest.Header header) throws IOException {
         long startedNanos = System.nanoTime();
+        Path manifestFile = cacheRoot.resolve(CacheManifest.FILE_NAME);
+        Map<String, CacheManifest.Entry> previousEntries = readPreviousEntries(manifestFile, header.targetDataVersion());
+
         Map<ResourceLocation, Resource> listed = new TreeMap<>(
-            resourceManager.listResources("structure", location -> location.getPath().endsWith(".nbt"))
+            resourceManager.listResources("structure", loc -> loc.getPath().endsWith(".nbt"))
         );
-        Map<String, CacheEntry> previousEntries = readPreviousIndex(identity).map(CacheIndex::entries).orElse(Map.of());
-        List<ResourceResult> results = processResources(listed, previousEntries, identity);
+        Files.createDirectories(overlayDataDir);
 
-        Map<String, CacheEntry> nextEntries = new TreeMap<>();
-        Map<ResourceLocation, Path> preparedResources = new HashMap<>();
-        int converted = 0;
-        int passthrough = 0;
-        int cacheHits = 0;
-        int vanillaFallbacks = 0;
-        for (ResourceResult result : results) {
-            PreparedBlob blob = result.blob();
-            if (blob == null) {
-                vanillaFallbacks++;
-                continue;
-            }
-            nextEntries.put(result.location().toString(), blob.entry());
-            preparedResources.put(result.location(), blob.path());
-            if (result.cacheHit()) {
-                cacheHits++;
-            } else if (blob.entry().converted()) {
-                converted++;
-            } else {
-                passthrough++;
-            }
-        }
+        Map<String, CacheManifest.Entry> nextEntries = new TreeMap<>();
+        Set<Path> retainedOverlayFiles = new HashSet<>();
+        AtomicInteger converted = new AtomicInteger();
+        AtomicInteger passthrough = new AtomicInteger();
+        AtomicInteger cacheHits = new AtomicInteger();
+        AtomicInteger skippedBad = new AtomicInteger();
 
-        if (vanillaFallbacks == 0) {
-            commitIndexAndPrune(new CacheIndex(identity, nextEntries), Set.copyOf(preparedResources.values()));
-        }
-        ResourceResult slowest = results.stream().max(Comparator.comparingLong(ResourceResult::elapsedNanos)).orElse(null);
-        CacheBuildStats stats = new CacheBuildStats(
-            listed.size(),
-            converted,
-            passthrough,
-            cacheHits,
-            vanillaFallbacks,
-            TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos),
-            slowest == null ? "none" : slowest.location().toString()
-        );
-        return new CacheSnapshot(identity, preparedResources, stats);
-    }
-
-    private List<ResourceResult> processResources(
-        Map<ResourceLocation, Resource> listed,
-        Map<String, CacheEntry> previousEntries,
-        CacheIdentity identity
-    ) {
-        var preparations = new ConcurrentHashMap<CacheKey, FutureTask<PreparedBlob>>();
-        // close() waits for termination, including when preparation is interrupted.
-        try (ExecutorService workers = Executors.newFixedThreadPool(
-            workerThreads, Thread.ofPlatform().daemon().name("structure-dfu-cache-build-", 1).factory())) {
-            CompletionService<ResourceResult> completion = new ExecutorCompletionService<>(workers);
-            try {
-                for (Map.Entry<ResourceLocation, Resource> resource : listed.entrySet()) {
-                    completion.submit(() -> processResource(resource.getKey(), resource.getValue(), previousEntries, identity, preparations));
+        if (workers == 1 || listed.size() <= 1) {
+            for (Map.Entry<ResourceLocation, Resource> item : listed.entrySet()) {
+                ProcessOutcome outcome = processOne(
+                    item.getKey(),
+                    item.getValue(),
+                    previousEntries,
+                    header.targetDataVersion(),
+                    converted,
+                    passthrough,
+                    cacheHits,
+                    skippedBad
+                );
+                nextEntries.put(item.getKey().toString(), outcome.entry());
+                if (outcome.overlayFile() != null) {
+                    retainedOverlayFiles.add(outcome.overlayFile());
                 }
-                List<ResourceResult> results = new ArrayList<>(listed.size());
-                for (int index = 0; index < listed.size(); index++) {
-                    results.add(completion.take().get());
+            }
+        } else {
+            Map<String, CacheManifest.Entry> concurrentEntries = new ConcurrentHashMap<>(listed.size());
+            Set<Path> concurrentFiles = ConcurrentHashMap.newKeySet();
+            Semaphore inFlightBudget = new Semaphore(workers * 2);
+            try (ExecutorService pool = Executors.newFixedThreadPool(
+                workers, Thread.ofPlatform().daemon().name("structure-dfu-v2-", 1).factory())) {
+                var futures = new java.util.ArrayList<Future<?>>(listed.size());
+                for (Map.Entry<ResourceLocation, Resource> item : listed.entrySet()) {
+                    inFlightBudget.acquire();
+                    futures.add(pool.submit(() -> {
+                        try {
+                            ProcessOutcome outcome = processOne(
+                                item.getKey(),
+                                item.getValue(),
+                                previousEntries,
+                                header.targetDataVersion(),
+                                converted,
+                                passthrough,
+                                cacheHits,
+                                skippedBad
+                            );
+                            concurrentEntries.put(item.getKey().toString(), outcome.entry());
+                            if (outcome.overlayFile() != null) {
+                                concurrentFiles.add(outcome.overlayFile());
+                            }
+                        } finally {
+                            inFlightBudget.release();
+                        }
+                    }));
                 }
-                return results;
+                for (Future<?> future : futures) {
+                    future.get();
+                }
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
-                throw new CacheBuildException("Structure DFU cache build was interrupted", exception);
+                throw new IOException("Structure DFU cache build interrupted", exception);
             } catch (ExecutionException exception) {
                 if (exception.getCause() instanceof Error error) {
                     throw error;
                 }
-                throw new CacheBuildException("Structure DFU cache worker failed unexpectedly", exception.getCause());
+                throw new IOException("Structure DFU cache worker failed", exception.getCause());
             }
+            nextEntries.putAll(concurrentEntries);
+            retainedOverlayFiles.addAll(concurrentFiles);
         }
+
+        pruneOrphanOverlayFiles(retainedOverlayFiles);
+        CacheManifest.writeAtomic(manifestFile, header, nextEntries);
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+        return new BuildSummary(
+            listed.size(),
+            converted.get(),
+            passthrough.get(),
+            cacheHits.get(),
+            skippedBad.get(),
+            elapsedMs
+        );
     }
 
-    private ResourceResult processResource(
+    private ProcessOutcome processOne(
         ResourceLocation location,
         Resource resource,
-        Map<String, CacheEntry> previousEntries,
-        CacheIdentity identity,
-        ConcurrentHashMap<CacheKey, FutureTask<PreparedBlob>> preparations
+        Map<String, CacheManifest.Entry> previousEntries,
+        int targetDataVersion,
+        AtomicInteger converted,
+        AtomicInteger passthrough,
+        AtomicInteger cacheHits,
+        AtomicInteger skippedBad
     ) {
-        long startedNanos = System.nanoTime();
+        Path overlayTarget = resolveOverlayTarget(location);
         byte[] sourceBytes;
         try {
-            sourceBytes = readBounded(resource);
+            sourceBytes = readBounded(resource, MAX_COMPRESSED_RESOURCE_BYTES);
         } catch (IOException | RuntimeException exception) {
-            LOGGER.warn("Cannot capture structure {}; the complete flattened overlay is disabled: {}", location, rootMessage(exception));
-            return ResourceResult.vanillaFallback(location, elapsedSince(startedNanos));
+            LOGGER.debug("Skipping unreadable structure {}: {}", location, rootMessage(exception));
+            skippedBad.incrementAndGet();
+            deleteQuietly(overlayTarget);
+            return new ProcessOutcome(new CacheManifest.Entry("unreadable", CacheManifest.Status.P), null);
         }
 
-        CacheKey key = CacheKey.of(sourceBytes, identity);
-        var candidate = new FutureTask<>(() -> prepareBytes(sourceBytes, key, previousEntries.get(location.toString()), location));
-        var existing = preparations.putIfAbsent(key, candidate);
-        var task = existing == null ? candidate : existing;
-        task.run();
-        try {
-            PreparedBlob blob = task.get();
-            return new ResourceResult(location, blob, elapsedSince(startedNanos), existing != null || blob.cacheHit());
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new CacheBuildException("Structure preparation interrupted: " + location, exception);
-        } catch (ExecutionException exception) {
-            if (exception.getCause() instanceof Error error) {
-                throw error;
+        String sourceSha256 = sha256Hex(sourceBytes);
+        CacheManifest.Entry previous = previousEntries.get(location.toString());
+        if (previous != null && previous.sourceSha256().equals(sourceSha256)) {
+            if (previous.status() == CacheManifest.Status.P) {
+                deleteQuietly(overlayTarget);
+                cacheHits.incrementAndGet();
+                return new ProcessOutcome(previous, null);
             }
-            LOGGER.warn("Cannot prepare structure {}; the complete flattened overlay is disabled: {}", location, rootMessage(exception));
-            return ResourceResult.vanillaFallback(location, elapsedSince(startedNanos));
-        }
-    }
-
-    private PreparedBlob prepareBytes(byte[] sourceBytes, CacheKey key, CacheEntry previous, ResourceLocation location) throws IOException {
-        if (previous != null && previous.digest().equals(key.digest())) {
-            String expectedPath = previous.converted() ? key.convertedBlobRelativePath() : key.sourceBlobRelativePath();
-            Path blob = cacheRoot.resolve(expectedPath);
-            if (previous.blobPath().equals(expectedPath) && Files.isRegularFile(blob, LinkOption.NOFOLLOW_LINKS)
-                && previous.blobDigest().equals(CacheKey.sha256(blob))) {
-                return new PreparedBlob(previous, blob, true);
+            if (previous.status() == CacheManifest.Status.C
+                && Files.isRegularFile(overlayTarget, LinkOption.NOFOLLOW_LINKS)
+                && safeSize(overlayTarget) > 0L) {
+                cacheHits.incrementAndGet();
+                return new ProcessOutcome(previous, overlayTarget);
             }
         }
-        // No valid index means existing files are untrusted and must be replaced.
-        CompoundTag converted = null;
-        try {
-            CompoundTag original = readCompressed(sourceBytes, MAX_DECODED_NBT_BYTES);
-            int sourceVersion = NbtUtils.getDataVersion(original, MISSING_DATA_VERSION);
-            if (isStructureTemplate(original) && sourceVersion < key.identity().targetDataVersion()) {
-                converted = DataFixTypes.STRUCTURE.update(dataFixer, original, sourceVersion, key.identity().targetDataVersion());
-                NbtUtils.addCurrentDataVersion(converted);
-                if (NbtUtils.getDataVersion(converted, MISSING_DATA_VERSION) != key.identity().targetDataVersion()) {
-                    throw new CacheBuildException("official DFU did not produce the requested DataVersion");
-                }
-            }
-        } catch (IOException | RuntimeException exception) {
-            converted = null;
-            LOGGER.warn("Cannot optimize structure {}; preserving its exact vanilla bytes: {}", location, rootMessage(exception));
-        }
-        // Disk failure must disable this generation, not masquerade as a DFU failure.
-        boolean upgraded = converted != null;
-        String relativePath = upgraded ? key.convertedBlobRelativePath() : key.sourceBlobRelativePath();
-        Path blob = cacheRoot.resolve(relativePath);
-        String digest = upgraded ? writeTag(blob, converted) : CacheFiles.write(blob, output -> output.write(sourceBytes));
-        return new PreparedBlob(new CacheEntry(key.digest(), digest, relativePath, upgraded), blob, false);
-    }
 
-    private Optional<CacheIndex> readPreviousIndex(CacheIdentity identity) {
+        CompoundTag parsed;
         try {
-            return CacheIndexStore.read(cacheRoot.resolve("index.json")).filter(index -> index.identity().equals(identity));
+            parsed = NbtIo.readCompressed(new ByteArrayInputStream(sourceBytes), NbtAccounter.create(MAX_DECODED_NBT_BYTES));
         } catch (IOException | RuntimeException exception) {
-            LOGGER.warn("Ignoring unreadable structure DFU cache index: {}", rootMessage(exception));
-            return Optional.empty();
+            LOGGER.debug("Skipping unparseable structure {}: {}", location, rootMessage(exception));
+            skippedBad.incrementAndGet();
+            deleteQuietly(overlayTarget);
+            return new ProcessOutcome(new CacheManifest.Entry(sourceSha256, CacheManifest.Status.P), null);
         }
-    }
+        // Release compressed input immediately after NBT decode.
+        sourceBytes = null;
 
-    private void commitIndexAndPrune(CacheIndex index, Set<Path> retained) {
+        int sourceVersion = NbtUtils.getDataVersion(parsed, MISSING_DATA_VERSION);
+        if (!isStructureTemplate(parsed) || sourceVersion >= targetDataVersion) {
+            passthrough.incrementAndGet();
+            deleteQuietly(overlayTarget);
+            return new ProcessOutcome(new CacheManifest.Entry(sourceSha256, CacheManifest.Status.P), null);
+        }
+
+        CompoundTag upgraded = DataFixTypes.STRUCTURE.update(dataFixer, parsed, sourceVersion, targetDataVersion);
+        parsed = null;
+        NbtUtils.addCurrentDataVersion(upgraded);
         try {
-            CacheIndexStore.writeAtomic(cacheRoot.resolve("index.json"), index);
+            writeGzipNbt(overlayTarget, upgraded);
         } catch (IOException exception) {
-            throw new CacheBuildException("Cannot commit structure DFU cache index", exception);
+            LOGGER.debug("Failed to write upgraded structure {}: {}", location, rootMessage(exception));
+            skippedBad.incrementAndGet();
+            deleteQuietly(overlayTarget);
+            return new ProcessOutcome(new CacheManifest.Entry(sourceSha256, CacheManifest.Status.P), null);
         }
-        pruneTree(cacheRoot.resolve("blobs"), retained);
-        pruneTree(cacheRoot.resolve("sources"), retained);
+        converted.incrementAndGet();
+        return new ProcessOutcome(new CacheManifest.Entry(sourceSha256, CacheManifest.Status.C), overlayTarget);
     }
 
-    private void pruneTree(Path root, Set<Path> retained) {
-        if (!Files.isDirectory(root)) {
+    private Path resolveOverlayTarget(ResourceLocation location) {
+        Path target = overlayDataDir.resolve(location.getNamespace()).resolve(location.getPath()).normalize();
+        if (!target.startsWith(overlayDataDir)) {
+            throw new IllegalArgumentException("Structure path escaped overlay root: " + location);
+        }
+        return target;
+    }
+
+    private Map<String, CacheManifest.Entry> readPreviousEntries(Path manifestFile, int targetDataVersion) {
+        try {
+            return CacheManifest.readEntriesIfMatchingTarget(manifestFile, targetDataVersion);
+        } catch (IOException | RuntimeException exception) {
+            LOGGER.debug("Ignoring unreadable manifest.v2: {}", rootMessage(exception));
+            return new HashMap<>();
+        }
+    }
+
+    private void pruneOrphanOverlayFiles(Set<Path> retainedOverlayFiles) {
+        if (!Files.isDirectory(overlayDataDir)) {
             return;
         }
-        long removed = 0L;
-        try (var paths = Files.walk(root)) {
-            for (Path path : paths.filter(Files::isRegularFile).toList()) {
-                if (!retained.contains(path.normalize()) && Files.deleteIfExists(path)) {
-                    removed++;
+        try (var walk = Files.walk(overlayDataDir)) {
+            for (Path path : walk.sorted(Comparator.reverseOrder()).toList()) {
+                if (path.equals(overlayDataDir)) {
+                    continue;
+                }
+                if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                    if (!retainedOverlayFiles.contains(path.normalize())) {
+                        Files.deleteIfExists(path);
+                    }
+                } else if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                    try (var children = Files.list(path)) {
+                        if (children.findAny().isEmpty()) {
+                            Files.deleteIfExists(path);
+                        }
+                    }
                 }
             }
         } catch (IOException | UncheckedIOException exception) {
-            LOGGER.warn("Unable to fully prune unreferenced structure DFU cache blobs: {}", rootMessage(exception));
-        }
-        if (removed > 0L) {
-            LOGGER.debug("Pruned {} unreferenced structure DFU cache blobs under {}", removed, root.getFileName());
+            LOGGER.debug("Unable to prune orphan overlay files: {}", rootMessage(exception));
         }
     }
 
-    static byte[] readBounded(Resource resource) throws IOException {
+    static int adaptiveWorkers() {
+        Runtime runtime = Runtime.getRuntime();
+        long maxHeap = runtime.maxMemory();
+        long usedHeap = runtime.totalMemory() - runtime.freeMemory();
+        long headroom = maxHeap - usedHeap;
+        return workerCountFor(maxHeap, headroom, runtime.availableProcessors());
+    }
+
+    static int workerCountFor(long maxHeapBytes, long headroomBytes, int cpus) {
+        if (maxHeapBytes <= 6_800_000_000L || headroomBytes < 2_500_000_000L) {
+            return 1;
+        }
+        return Math.min(4, Math.max(2, cpus - 1));
+    }
+
+    static byte[] readBounded(Resource resource, int maximumBytes) throws IOException {
         try (InputStream input = resource.open()) {
-            return readBounded(input, MAX_COMPRESSED_RESOURCE_BYTES);
+            byte[] bytes = input.readNBytes(maximumBytes);
+            if (input.read() != -1) {
+                throw new IOException("compressed structure exceeds " + maximumBytes + " bytes");
+            }
+            return bytes;
         }
-    }
-
-    static byte[] readBounded(InputStream input, int maximumBytes) throws IOException {
-        if (maximumBytes < 1) {
-            throw new IllegalArgumentException("maximumBytes must be positive");
-        }
-        byte[] bytes = input.readNBytes(maximumBytes);
-        if (input.read() != -1) {
-            throw new IOException("compressed structure exceeds " + maximumBytes + " bytes");
-        }
-        return bytes;
-    }
-
-    static CompoundTag readCompressed(byte[] bytes, long maxHeapBytes) throws IOException {
-        if (maxHeapBytes < 1L) {
-            throw new IllegalArgumentException("maxHeapBytes must be positive");
-        }
-        return NbtIo.readCompressed(new ByteArrayInputStream(bytes), NbtAccounter.create(maxHeapBytes));
     }
 
     private static boolean isStructureTemplate(CompoundTag tag) {
@@ -282,20 +317,42 @@ public final class StructureCacheBuilder {
             && (tag.contains("palette", Tag.TAG_LIST) || tag.contains("palettes", Tag.TAG_LIST));
     }
 
-    private static String writeTag(Path blob, CompoundTag tag) throws IOException {
-        return CacheFiles.write(blob, output -> {
+    private static void writeGzipNbt(Path target, CompoundTag tag) throws IOException {
+        Files.createDirectories(target.getParent());
+        Path tmp = target.resolveSibling(target.getFileName() + ".tmp-" + Thread.currentThread().threadId());
+        try {
             try (
-                BufferedOutputStream buffered = new BufferedOutputStream(output);
+                OutputStream fileOut = Files.newOutputStream(tmp);
+                BufferedOutputStream buffered = new BufferedOutputStream(fileOut);
                 GZIPOutputStream gzip = new FastGzipOutputStream(buffered);
-                DataOutputStream data = new DataOutputStream(gzip)
+                DataOutputStream dataOut = new DataOutputStream(gzip)
             ) {
-                NbtIo.write(tag, data);
+                NbtIo.write(tag, dataOut);
             }
-        });
+            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
     }
 
-    private static long elapsedSince(long startedNanos) {
-        return System.nanoTime() - startedNanos;
+    private static String sha256Hex(byte[] bytes) {
+        MessageDigest digest = PackFingerprint.sha256Digest();
+        return HexFormat.of().formatHex(digest.digest(bytes));
+    }
+
+    private static long safeSize(Path path) {
+        try {
+            return Files.size(path);
+        } catch (IOException exception) {
+            return -1L;
+        }
+    }
+
+    private static void deleteQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException ignored) {
+        }
     }
 
     private static String rootMessage(Throwable throwable) {
@@ -314,12 +371,6 @@ public final class StructureCacheBuilder {
         }
     }
 
-    private record PreparedBlob(CacheEntry entry, Path path, boolean cacheHit) {
-    }
-
-    private record ResourceResult(ResourceLocation location, PreparedBlob blob, long elapsedNanos, boolean cacheHit) {
-        static ResourceResult vanillaFallback(ResourceLocation location, long elapsedNanos) {
-            return new ResourceResult(location, null, elapsedNanos, false);
-        }
+    private record ProcessOutcome(CacheManifest.Entry entry, Path overlayFile) {
     }
 }

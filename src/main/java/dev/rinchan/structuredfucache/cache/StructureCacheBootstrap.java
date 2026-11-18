@@ -10,198 +10,119 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Comparator;
-import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import net.minecraft.SharedConstants;
-import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.packs.PackLocationInfo;
-import net.minecraft.server.packs.PackResources;
-import net.minecraft.server.packs.PackType;
-import net.minecraft.server.packs.PathPackResources;
-import net.minecraft.server.packs.repository.PackSource;
-import net.minecraft.server.packs.resources.MultiPackResourceManager;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.neoforged.fml.loading.FMLLoader;
 import net.neoforged.fml.loading.FMLPaths;
 import org.slf4j.Logger;
 
+/**
+ * Entry point for StructureTemplateManagerMixin.
+ * Cleans legacy 1.x artifacts, checks manifest.v2 line-1 header for a sub-5ms fast-path mount,
+ * or runs StructureCacheBuilder on miss/change.
+ */
 public final class StructureCacheBootstrap {
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final long RESERVED_HEAP_BYTES = 2L * 1024L * 1024L * 1024L;
-    private static final long BYTES_PER_CONVERSION_WORKER = 1024L * 1024L * 1024L;
-    private static final int MAX_WORKERS = 4;
-    private static final PackLocationInfo OVERLAY_INFO = new PackLocationInfo(
-        StructureDfuCache.MOD_ID + "_generated",
-        Component.literal("Structure DFU Cache generated overlay"),
-        PackSource.BUILT_IN,
-        Optional.empty()
-    );
 
     private StructureCacheBootstrap() {
     }
 
-    public static PreparedStructureResources prepare(ResourceManager original, DataFixer dataFixer) {
-        return prepare(original, dataFixer, cacheRoot(), identity(), adaptiveWorkerThreads());
+    public static ResourceManager prepare(ResourceManager original, DataFixer dataFixer) {
+        ResourceManager base = unwrap(original);
+        Path gameDir = FMLPaths.GAMEDIR.get();
+        Path cacheRoot = gameDir.resolve("cache").resolve(StructureDfuCache.MOD_ID);
+        var version = FMLLoader.versionInfo();
+        CacheManifest.Header header = new CacheManifest.Header(
+            SharedConstants.getCurrentVersion().getDataVersion().getVersion(),
+            version.mcVersion(),
+            version.neoForgeVersion(),
+            PackFingerprint.compute(base, gameDir)
+        );
+        return prepare(base, dataFixer, cacheRoot, header);
     }
 
-    static PreparedStructureResources prepare(
+    static ResourceManager prepare(
         ResourceManager original,
         DataFixer dataFixer,
         Path cacheRoot,
-        CacheIdentity identity,
-        int workers
+        CacheManifest.Header expectedHeader
     ) {
-        Path generation = null;
+        ResourceManager base = unwrap(original);
+        long startedNanos = System.nanoTime();
         try {
             Files.createDirectories(cacheRoot);
-            // Keep index replacement, pruning and materialization in one exclusive maintenance window.
             try (var channel = FileChannel.open(cacheRoot.resolve("prepare.lock"),
                      StandardOpenOption.CREATE, StandardOpenOption.WRITE);
                  var lock = channel.tryLock()) {
                 if (lock == null) {
-                    throw new CacheBuildException("Cache is being prepared by another process");
-                }
-                CacheSnapshot snapshot = new StructureCacheBuilder(dataFixer, cacheRoot, workers).build(original, identity);
-                CacheBuildStats stats = snapshot.stats();
-                if (stats.totalResources() == 0 || stats.vanillaFallbacks() > 0
-                    || snapshot.preparedResources().size() != stats.totalResources()) {
-                    logReady(stats, workers, "vanilla resources");
-                    return new PreparedStructureResources(original, null);
+                    LOGGER.warn("Structure DFU cache lock is held by another process; using vanilla resources.");
+                    return base;
                 }
 
-                generation = materializeOverlay(cacheRoot, snapshot);
-                PackResources preparedPack = new PathPackResources(OVERLAY_INFO, generation);
-                ResourceManager prepared = new MultiPackResourceManager(PackType.SERVER_DATA, List.of(preparedPack));
-                logReady(stats, workers, generation.toString());
-                return new PreparedStructureResources(prepared, generation);
+                cleanupLegacyArtifacts(cacheRoot);
+
+                Path manifestFile = cacheRoot.resolve(CacheManifest.FILE_NAME);
+                Path overlayDataDir = cacheRoot.resolve("overlay").resolve("data");
+                Optional<CacheManifest.Header> existing = CacheManifest.readHeaderOnly(manifestFile);
+                if (existing.isPresent() && existing.get().equals(expectedHeader) && Files.isDirectory(overlayDataDir)) {
+                    long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+                    LOGGER.info(
+                        "Structure DFU cache mounted in {} ms (fast-path, fingerprint={})",
+                        elapsedMs,
+                        shortFingerprint(expectedHeader.packFingerprint())
+                    );
+                    return new StructureOverlayResourceManager(base, overlayDataDir);
+                }
+
+                StructureCacheBuilder.BuildSummary summary =
+                    new StructureCacheBuilder(dataFixer, cacheRoot).build(base, expectedHeader);
+                LOGGER.info(
+                    "Structure DFU cache built in {} ms (total={}, converted={}, passthrough={}, cacheHits={}, skippedBad={}, fingerprint={})",
+                    summary.elapsedMs(),
+                    summary.total(),
+                    summary.converted(),
+                    summary.passthrough(),
+                    summary.cacheHits(),
+                    summary.skippedBad(),
+                    shortFingerprint(expectedHeader.packFingerprint())
+                );
+                return new StructureOverlayResourceManager(base, overlayDataDir);
             }
         } catch (IOException | RuntimeException exception) {
-            deleteTree(generation);
-            LOGGER.error(
-                "Structure DFU cache disabled for this resource generation; vanilla structure loading remains active: {}",
-                rootMessage(exception)
-            );
-            return new PreparedStructureResources(original, null);
+            LOGGER.error("Structure DFU cache disabled; falling back to vanilla resources: {}", exception.getMessage());
+            return base;
         }
     }
 
-    public static void retireGeneration(Path generation) {
-        deleteTree(generation);
+    private static ResourceManager unwrap(ResourceManager manager) {
+        return manager instanceof StructureOverlayResourceManager overlay ? overlay.delegate() : manager;
     }
 
-    static int adaptiveWorkerThreads() {
-        return workerThreadsFor(Runtime.getRuntime().maxMemory(), Runtime.getRuntime().availableProcessors());
-    }
-
-    static int workerThreadsFor(long maximumHeapBytes, int availableProcessors) {
-        if (maximumHeapBytes < 1L || availableProcessors < 1) {
-            throw new IllegalArgumentException("heap and processor counts must be positive");
-        }
-        int cpuBudget = Math.max(1, availableProcessors - 1);
-        long conversionHeap = Math.max(0L, maximumHeapBytes - RESERVED_HEAP_BYTES);
-        int heapBudget = (int)Math.clamp(conversionHeap / BYTES_PER_CONVERSION_WORKER, 1L, MAX_WORKERS);
-        return Math.min(MAX_WORKERS, Math.min(cpuBudget, heapBudget));
-    }
-
-    static Path materializeOverlay(Path cacheRoot, CacheSnapshot snapshot) {
-        Path generations = cacheRoot.resolve("generations");
-        Path temporary = generations.resolve(".tmp-" + UUID.randomUUID());
-        Path completed = generations.resolve(UUID.randomUUID().toString());
+    private static void cleanupLegacyArtifacts(Path cacheRoot) {
+        deleteTreeQuietly(cacheRoot.resolve("blobs"));
+        deleteTreeQuietly(cacheRoot.resolve("sources"));
+        deleteTreeQuietly(cacheRoot.resolve("generations"));
         try {
-            Files.createDirectories(temporary.resolve("data"));
-            for (var entry : snapshot.preparedResources().entrySet()) {
-                ResourceLocation location = entry.getKey();
-                Path target = temporary.resolve("data")
-                    .resolve(location.getNamespace())
-                    .resolve(location.getPath())
-                    .normalize();
-                if (!target.startsWith(temporary)) {
-                    throw new CacheBuildException("Generated resource escaped overlay root: " + location);
-                }
-                Files.createDirectories(target.getParent());
-                linkOrCopy(entry.getValue(), target);
-            }
-            String metadata = "{\"pack\":{\"description\":\"Structure DFU Cache generated overlay\",\"pack_format\":"
-                + SharedConstants.getCurrentVersion().getPackVersion(PackType.SERVER_DATA) + "}}\n";
-            Files.writeString(temporary.resolve("pack.mcmeta"), metadata);
-            try {
-                Files.move(temporary, completed, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-            } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
-                Files.move(temporary, completed);
-            }
-            return completed;
-        } catch (IOException | RuntimeException exception) {
-            deleteTree(temporary);
-            throw new CacheBuildException("Cannot materialize generated structure resource overlay", exception);
+            Files.deleteIfExists(cacheRoot.resolve("index.json"));
+        } catch (IOException ignored) {
         }
     }
 
-    private static void linkOrCopy(Path source, Path target) throws IOException {
-        try {
-            Files.createLink(target, source);
-        } catch (IOException | UnsupportedOperationException exception) {
-            Files.copy(source, target);
-        }
-    }
-
-    private static CacheIdentity identity() {
-        var version = FMLLoader.versionInfo();
-        return new CacheIdentity(
-            CacheIdentity.CURRENT_FORMAT,
-            SharedConstants.getCurrentVersion().getDataVersion().getVersion(),
-            version.mcVersion(),
-            version.neoForgeVersion()
-        );
-    }
-
-    private static Path cacheRoot() {
-        return FMLPaths.GAMEDIR.get().resolve("cache").resolve(StructureDfuCache.MOD_ID);
-    }
-
-    private static void deleteTree(Path root) {
-        if (root == null || !Files.exists(root)) {
+    private static void deleteTreeQuietly(Path root) {
+        if (!Files.exists(root)) {
             return;
         }
         try (var paths = Files.walk(root)) {
             for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
                 Files.deleteIfExists(path);
             }
-        } catch (IOException | UncheckedIOException exception) {
-            LOGGER.warn("Unable to remove stale structure DFU overlay {}: {}", root, rootMessage(exception));
+        } catch (IOException | UncheckedIOException ignored) {
         }
     }
 
-    private static void logReady(CacheBuildStats stats, int workers, String resourceLayer) {
-        LOGGER.debug(
-            "Structure DFU cache prepared before gameplay: resources={}, converted={}, passthrough={}, cacheHits={}, vanillaFallbacks={}, workers={}, elapsed={} ms, slowest={}, layer={}",
-            stats.totalResources(),
-            stats.converted(),
-            stats.passthrough(),
-            stats.cacheHits(),
-            stats.vanillaFallbacks(),
-            workers,
-            stats.elapsedMillis(),
-            stats.slowestResource(),
-            resourceLayer
-        );
-    }
-
-    private static String rootMessage(Throwable throwable) {
-        Throwable current = throwable;
-        while (current.getCause() != null && current.getCause() != current) {
-            current = current.getCause();
-        }
-        String message = current.getMessage();
-        return current.getClass().getSimpleName() + (message == null ? "" : ": " + message);
-    }
-
-    public record PreparedStructureResources(ResourceManager resourceManager, Path generationRoot) {
-        public PreparedStructureResources {
-            if (resourceManager == null) {
-                throw new IllegalArgumentException("resourceManager must not be null");
-            }
-        }
+    private static String shortFingerprint(String fingerprint) {
+        return fingerprint.length() <= 12 ? fingerprint : fingerprint.substring(0, 12);
     }
 }
