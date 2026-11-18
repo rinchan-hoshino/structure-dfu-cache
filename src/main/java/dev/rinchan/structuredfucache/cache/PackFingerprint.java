@@ -1,5 +1,6 @@
 package dev.rinchan.structuredfucache.cache;
 
+import com.mojang.logging.LogUtils;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -15,12 +16,15 @@ import net.minecraft.server.packs.PackResources;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.neoforged.fml.ModList;
 import net.neoforged.neoforgespi.language.IModFileInfo;
+import org.slf4j.Logger;
 
 /**
  * Computes a deterministic SHA-256 fingerprint of the active pack stack, NeoForge mod files,
  * and external datapack/mod file metadata (size + mtime) without reading any NBT payloads.
  */
 public final class PackFingerprint {
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     private PackFingerprint() {
     }
 
@@ -29,24 +33,28 @@ public final class PackFingerprint {
             ? overlay.delegate()
             : original;
         MessageDigest digest = sha256Digest();
+        Path normalizedGameDir = gameDir != null ? gameDir.toAbsolutePath().normalize() : null;
+        Path realGameDir = toRealPathQuietly(normalizedGameDir);
 
+        List<String> packIds = new ArrayList<>();
         update(digest, "packs");
         try (Stream<PackResources> packs = base.listPacks()) {
-            packs.forEach(pack -> update(digest, pack.packId()));
+            packs.forEach(pack -> {
+                String id = normalizeGameDirString(pack.packId(), normalizedGameDir, realGameDir);
+                packIds.add(id);
+                update(digest, id);
+            });
         }
 
         update(digest, "modlist");
-        Path normalizedGameDir = gameDir != null ? gameDir.toAbsolutePath().normalize() : null;
         try {
             ModList modList = ModList.get();
             if (modList != null) {
                 record ModEntry(String key, Path path) {}
                 List<ModEntry> modEntries = new ArrayList<>();
                 for (IModFileInfo info : modList.getModFiles()) {
-                    Path path = info.getFile().getFilePath().toAbsolutePath().normalize();
-                    String key = (normalizedGameDir != null && path.startsWith(normalizedGameDir))
-                        ? normalizedGameDir.relativize(path).toString()
-                        : path.getFileName().toString();
+                    Path path = toRealPathQuietly(info.getFile().getFilePath().toAbsolutePath().normalize());
+                    String key = relativizeKey(path, normalizedGameDir, realGameDir);
                     modEntries.add(new ModEntry(key, path));
                 }
                 modEntries.sort(Comparator.comparing(ModEntry::key));
@@ -64,7 +72,42 @@ public final class PackFingerprint {
             feedDirectoryStats(digest, "world_datapacks", normalizedGameDir.resolve("world/datapacks"), null);
         }
 
-        return HexFormat.of().formatHex(digest.digest());
+        String hex = HexFormat.of().formatHex(digest.digest());
+        LOGGER.debug("Computed PackFingerprint={} (packs={})", hex, packIds);
+        return hex;
+    }
+
+    private static String relativizeKey(Path path, Path normalizedGameDir, Path realGameDir) {
+        if (realGameDir != null && path.startsWith(realGameDir)) {
+            return realGameDir.relativize(path).toString();
+        }
+        if (normalizedGameDir != null && path.startsWith(normalizedGameDir)) {
+            return normalizedGameDir.relativize(path).toString();
+        }
+        Path fileName = path.getFileName();
+        return fileName != null ? fileName.toString() : path.toString();
+    }
+
+    private static String normalizeGameDirString(String value, Path normalizedGameDir, Path realGameDir) {
+        String out = value;
+        if (realGameDir != null) {
+            out = out.replace(realGameDir.toString(), "<gameDir>");
+        }
+        if (normalizedGameDir != null) {
+            out = out.replace(normalizedGameDir.toString(), "<gameDir>");
+        }
+        return out;
+    }
+
+    private static Path toRealPathQuietly(Path path) {
+        if (path == null) {
+            return null;
+        }
+        try {
+            return path.toRealPath();
+        } catch (IOException ignored) {
+            return path;
+        }
     }
 
     private static void feedDirectoryStats(MessageDigest digest, String label, Path root, String suffixFilter) {
