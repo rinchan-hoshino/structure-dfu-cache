@@ -80,6 +80,9 @@ def main():
         if line.startswith("mod_version=")
     )
     output = ROOT / "build/releases"
+    if not args.profile and output.exists():
+        for stale_jar in output.glob("*.jar"):
+            stale_jar.unlink()
     output.mkdir(parents=True, exist_ok=True)
     lock = (ROOT / "build/matrix.lock").open("w")
     fcntl.flock(lock, fcntl.LOCK_EX)
@@ -135,6 +138,27 @@ def main():
             print(f"BUILT & VERIFIED {minecraft} {loader}: {target.name} ({len(binary):,} bytes)", flush=True)
 
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    if not args.profile:
+        audit_env = os.environ.copy()
+        audit_env["JAVA_HOME"] = all_jdks[profiles["1.21.1"]["java"]]
+        subprocess.run(
+            [
+                str(ROOT / "gradlew"),
+                ":neoforge:test",
+                "--tests",
+                "dev.rinchan.structuredfucache.ArchitectureContractTest",
+                "--rerun-tasks",
+                "-Pminecraft_version=1.21.1",
+                "-Ploader=neoforge",
+                "-PrequireAllReleases=true",
+                "-Porg.gradle.java.installations.paths=" + installations_paths,
+                "--no-configuration-cache",
+                "--max-workers=2",
+            ],
+            cwd=ROOT,
+            env=audit_env,
+            check=True,
+        )
     print(f"ALL DONE ({len(manifest)} targets).", flush=True)
 
 

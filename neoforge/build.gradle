@@ -84,6 +84,11 @@ tasks.named('test', Test) {
     useJUnitPlatform()
     doFirst {
         systemProperty 'structure_dfu_cache.packagedJar', tasks.named('jar').get().archiveFile.get().asFile.absolutePath
+        systemProperty 'structure_dfu_cache.releasesDir', rootProject.layout.projectDirectory.dir('build/releases').asFile.absolutePath
+        def reqAll = findProperty('requireAllReleases') ?: System.getProperty('structure_dfu_cache.requireAllReleases')
+        if (reqAll != null) {
+            systemProperty 'structure_dfu_cache.requireAllReleases', reqAll.toString()
+        }
     }
 }
 

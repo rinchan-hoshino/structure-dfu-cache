@@ -1,16 +1,14 @@
 package dev.rinchan.structuredfucache.forge;
 
 import dev.rinchan.structuredfucache.StructureDfuCache;
-import dev.rinchan.structuredfucache.client.StructureDfuCacheConfigScreen;
+import dev.rinchan.structuredfucache.forge.client.StructureDfuCacheForgeClient;
 import dev.rinchan.structuredfucache.platform.PlatformBridge;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.ConfigScreenHandler;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.ModList;
-import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.loading.FMLLoader;
 import net.minecraftforge.fml.loading.FMLPaths;
@@ -20,16 +18,7 @@ import net.minecraftforge.forgespi.language.IModFileInfo;
 public final class StructureDfuCacheForge {
     public StructureDfuCacheForge() {
         StructureDfuCache.init(new ForgePlatformBridge());
-        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> StructureDfuCacheForge::registerConfigScreen);
-    }
-
-    private static void registerConfigScreen() {
-        ModLoadingContext.get().registerExtensionPoint(
-            ConfigScreenHandler.ConfigScreenFactory.class,
-            () -> new ConfigScreenHandler.ConfigScreenFactory(
-                (mc, parent) -> new StructureDfuCacheConfigScreen(parent)
-            )
-        );
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> StructureDfuCacheForgeClient::register);
     }
 
     private static final class ForgePlatformBridge implements PlatformBridge {

@@ -18,10 +18,13 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +36,7 @@ class ArchitectureContractTest {
         "net/minecraft/client/",
         "net/neoforged/neoforge/client/",
         "net/minecraftforge/client/",
+        "com/mojang/blaze3d/",
         "com/terraformersmc/modmenu/"
     );
 
@@ -42,32 +46,68 @@ class ArchitectureContractTest {
         "testresourceadapter"
     );
 
-    private static Path packagedJar;
+    private static List<Path> targetJars;
 
     @BeforeAll
-    static void locatePackagedJar() {
+    static void locatePackagedJars() throws IOException {
+        Map<Path, Path> unique = new LinkedHashMap<>();
         String configured = System.getProperty("structure_dfu_cache.packagedJar");
-        assertNotNull(configured, "System property 'structure_dfu_cache.packagedJar' must be set by Gradle test task");
-        packagedJar = Path.of(configured);
-        assertTrue(Files.isRegularFile(packagedJar), "Packaged JAR must exist before ArchitectureContractTest runs: " + packagedJar);
+        if (configured != null && !configured.isBlank()) {
+            Path jar = Path.of(configured);
+            assertTrue(Files.isRegularFile(jar), "Packaged JAR must exist before ArchitectureContractTest runs: " + jar);
+            unique.put(jar.toRealPath(), jar);
+        }
+
+        String releasesProp = System.getProperty("structure_dfu_cache.releasesDir");
+        Path releasesDir = (releasesProp != null && !releasesProp.isBlank())
+            ? Path.of(releasesProp)
+            : Path.of("build/releases");
+        boolean requireAll = Boolean.parseBoolean(System.getProperty("structure_dfu_cache.requireAllReleases", "false"));
+
+        List<Path> releaseJars = List.of();
+        if (Files.isDirectory(releasesDir)) {
+            try (Stream<Path> stream = Files.list(releasesDir)) {
+                releaseJars = stream
+                    .filter(Files::isRegularFile)
+                    .filter(p -> {
+                        String name = p.getFileName().toString();
+                        return name.startsWith("structure-dfu-cache-") && name.endsWith(".jar");
+                    })
+                    .sorted()
+                    .toList();
+            }
+            for (Path jar : releaseJars) {
+                unique.put(jar.toRealPath(), jar);
+            }
+        }
+        if (requireAll) {
+            assertTrue(
+                releaseJars.size() == 8,
+                "Expected all 8 release JARs in " + releasesDir + ", found " + releaseJars.size() + ": " + releaseJars
+            );
+        }
+        assertFalse(unique.isEmpty(), "No packaged JARs found to audit");
+        targetJars = List.copyOf(unique.values());
     }
 
     @Test
     void dedicatedServerClassesNeverReferenceClientOnlyBytecode() throws IOException {
         List<String> violations = new ArrayList<>();
-        try (JarFile jar = new JarFile(packagedJar.toFile())) {
-            Enumeration<JarEntry> entries = jar.entries();
-            while (entries.hasMoreElements()) {
-                JarEntry entry = entries.nextElement();
-                String name = entry.getName();
-                if (!name.endsWith(".class") || isClientOnlyClass(name)) {
-                    continue;
-                }
-                byte[] bytecode = readEntry(jar, entry);
-                for (String utf8 : extractConstantPoolUtf8s(bytecode)) {
-                    for (String forbidden : CLIENT_ONLY_PREFIXES) {
-                        if (utf8.contains(forbidden)) {
-                            violations.add(name + " -> " + utf8);
+        for (Path packagedJar : targetJars) {
+            try (JarFile jar = new JarFile(packagedJar.toFile())) {
+                Enumeration<JarEntry> entries = jar.entries();
+                while (entries.hasMoreElements()) {
+                    JarEntry entry = entries.nextElement();
+                    String name = entry.getName();
+                    if (!name.endsWith(".class") || isClientOnlyClass(name)) {
+                        continue;
+                    }
+                    byte[] bytecode = readEntry(jar, entry);
+                    for (String utf8 : extractConstantPoolUtf8s(bytecode)) {
+                        for (String forbidden : CLIENT_ONLY_PREFIXES) {
+                            if (utf8.contains(forbidden)) {
+                                violations.add(packagedJar.getFileName() + ": " + name + " -> " + utf8);
+                            }
                         }
                     }
                 }
@@ -81,90 +121,94 @@ class ArchitectureContractTest {
 
     @Test
     void mixinConfigAndPackagedClassesFormBidirectionalClosure() throws IOException {
-        try (JarFile jar = new JarFile(packagedJar.toFile())) {
-            JarEntry configEntry = jar.getJarEntry("structure_dfu_cache.mixins.json");
-            assertNotNull(configEntry, "structure_dfu_cache.mixins.json must exist in packaged JAR");
+        for (Path packagedJar : targetJars) {
+            try (JarFile jar = new JarFile(packagedJar.toFile())) {
+                JarEntry configEntry = jar.getJarEntry("structure_dfu_cache.mixins.json");
+                assertNotNull(configEntry, "structure_dfu_cache.mixins.json must exist in packaged JAR: " + packagedJar.getFileName());
 
-            String jsonText = new String(readEntry(jar, configEntry), StandardCharsets.UTF_8);
-            JsonObject root = JsonParser.parseString(jsonText).getAsJsonObject();
-            String mixinPkg = root.get("package").getAsString().replace('.', '/');
+                String jsonText = new String(readEntry(jar, configEntry), StandardCharsets.UTF_8);
+                JsonObject root = JsonParser.parseString(jsonText).getAsJsonObject();
+                String mixinPkg = root.get("package").getAsString().replace('.', '/');
 
-            Set<String> declaredClassEntries = new HashSet<>();
-            for (String section : List.of("mixins", "client", "server")) {
-                if (root.has(section) && root.get(section).isJsonArray()) {
-                    JsonArray arr = root.getAsJsonArray(section);
-                    for (JsonElement el : arr) {
-                        String rel = el.getAsString().replace('.', '/');
-                        declaredClassEntries.add(mixinPkg + "/" + rel + ".class");
+                Set<String> declaredClassEntries = new HashSet<>();
+                for (String section : List.of("mixins", "client", "server")) {
+                    if (root.has(section) && root.get(section).isJsonArray()) {
+                        JsonArray arr = root.getAsJsonArray(section);
+                        for (JsonElement el : arr) {
+                            String rel = el.getAsString().replace('.', '/');
+                            declaredClassEntries.add(mixinPkg + "/" + rel + ".class");
+                        }
                     }
                 }
-            }
-            assertFalse(declaredClassEntries.isEmpty(), "Mixin config must declare at least one Mixin");
+                assertFalse(declaredClassEntries.isEmpty(), "Mixin config must declare at least one Mixin in " + packagedJar.getFileName());
 
-            // Forward check: every declared Mixin exists in packaged JAR.
-            for (String expected : declaredClassEntries) {
-                assertNotNull(
-                    jar.getJarEntry(expected),
-                    "Declared Mixin class missing from packaged JAR: " + expected
-                );
-            }
-
-            // Reverse check: every @Mixin-annotated class in packaged JAR is declared in mixins.json.
-            Set<String> discoveredMixins = new HashSet<>();
-            Enumeration<JarEntry> entries = jar.entries();
-            while (entries.hasMoreElements()) {
-                JarEntry entry = entries.nextElement();
-                String name = entry.getName();
-                if (!name.endsWith(".class")) {
-                    continue;
+                // Forward check: every declared Mixin exists in packaged JAR.
+                for (String expected : declaredClassEntries) {
+                    assertNotNull(
+                        jar.getJarEntry(expected),
+                        "Declared Mixin class missing from packaged JAR " + packagedJar.getFileName() + ": " + expected
+                    );
                 }
-                List<String> pool = extractConstantPoolUtf8s(readEntry(jar, entry));
-                if (pool.contains("Lorg/spongepowered/asm/mixin/Mixin;")) {
-                    discoveredMixins.add(name);
-                }
-            }
 
-            assertFalse(discoveredMixins.isEmpty(), "Expected at least one @Mixin class in packaged JAR");
-            for (String discovered : discoveredMixins) {
-                assertTrue(
-                    declaredClassEntries.contains(discovered),
-                    "Unregistered @Mixin dead code found in packaged JAR: " + discovered
-                );
+                // Reverse check: every @Mixin-annotated class in packaged JAR is declared in mixins.json.
+                Set<String> discoveredMixins = new HashSet<>();
+                Enumeration<JarEntry> entries = jar.entries();
+                while (entries.hasMoreElements()) {
+                    JarEntry entry = entries.nextElement();
+                    String name = entry.getName();
+                    if (!name.endsWith(".class")) {
+                        continue;
+                    }
+                    List<String> pool = extractConstantPoolUtf8s(readEntry(jar, entry));
+                    if (pool.contains("Lorg/spongepowered/asm/mixin/Mixin;")) {
+                        discoveredMixins.add(name);
+                    }
+                }
+
+                assertFalse(discoveredMixins.isEmpty(), "Expected at least one @Mixin class in packaged JAR " + packagedJar.getFileName());
+                for (String discovered : discoveredMixins) {
+                    assertTrue(
+                        declaredClassEntries.contains(discovered),
+                        "Unregistered @Mixin dead code found in packaged JAR " + packagedJar.getFileName() + ": " + discovered
+                    );
+                }
             }
         }
     }
 
     @Test
     void packagedJarIsCleanAndContainsRequiredMetadata() throws IOException {
-        long size = Files.size(packagedJar);
-        assertTrue(size > 0 && size < 100 * 1024, "Packaged JAR size out of budget (<100KB): " + size);
+        for (Path packagedJar : targetJars) {
+            long size = Files.size(packagedJar);
+            assertTrue(size > 0 && size < 100 * 1024, "Packaged JAR size out of budget (<100KB) for " + packagedJar.getFileName() + ": " + size);
 
-        Set<String> entryNames = new HashSet<>();
-        List<String> forbiddenHits = new ArrayList<>();
-        try (JarFile jar = new JarFile(packagedJar.toFile())) {
-            Enumeration<JarEntry> entries = jar.entries();
-            while (entries.hasMoreElements()) {
-                String name = entries.nextElement().getName();
-                entryNames.add(name);
-                String lower = name.toLowerCase();
-                for (String forbidden : FORBIDDEN_ARTIFACT_PATTERNS) {
-                    if (lower.contains(forbidden)) {
-                        forbiddenHits.add(name);
+            Set<String> entryNames = new HashSet<>();
+            List<String> forbiddenHits = new ArrayList<>();
+            try (JarFile jar = new JarFile(packagedJar.toFile())) {
+                Enumeration<JarEntry> entries = jar.entries();
+                while (entries.hasMoreElements()) {
+                    String name = entries.nextElement().getName();
+                    entryNames.add(name);
+                    String lower = name.toLowerCase();
+                    for (String forbidden : FORBIDDEN_ARTIFACT_PATTERNS) {
+                        if (lower.contains(forbidden)) {
+                            forbiddenHits.add(packagedJar.getFileName() + ": " + name);
+                        }
                     }
                 }
             }
-        }
 
-        assertTrue(forbiddenHits.isEmpty(), "Forbidden entries leaked into packaged JAR: " + forbiddenHits);
-        for (String required : List.of(
-            "icon.png",
-            "structure_dfu_cache.mixins.json",
-            "assets/structure_dfu_cache/lang/en_us.json",
-            "assets/structure_dfu_cache/lang/zh_cn.json",
-            "assets/structure_dfu_cache/lang/zh_tw.json",
-            "assets/structure_dfu_cache/lang/ja_jp.json"
-        )) {
-            assertTrue(entryNames.contains(required), "Missing required resource in packaged JAR: " + required);
+            assertTrue(forbiddenHits.isEmpty(), "Forbidden entries leaked into packaged JAR: " + forbiddenHits);
+            for (String required : List.of(
+                "icon.png",
+                "structure_dfu_cache.mixins.json",
+                "assets/structure_dfu_cache/lang/en_us.json",
+                "assets/structure_dfu_cache/lang/zh_cn.json",
+                "assets/structure_dfu_cache/lang/zh_tw.json",
+                "assets/structure_dfu_cache/lang/ja_jp.json"
+            )) {
+                assertTrue(entryNames.contains(required), "Missing required resource in packaged JAR " + packagedJar.getFileName() + ": " + required);
+            }
         }
     }
 
