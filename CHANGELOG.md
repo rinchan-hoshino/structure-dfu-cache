@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.2
+
+- **Corrupt Manifest Self-Healing**: Hardened `CacheManifest` against non-UTF-8 or binary-corrupted `manifest.v2` files by safely catching `MalformedInputException` / `IOException` and automatically rebuilding the cache instead of crashing startup.
+- **Verification & Build Tooling**: Added local 3-gate verification (`./scripts/verify.sh` with optional `--container` Docker runner) covering all 8 matrix JARs, property tests, `ArchitectureContractTest`, and packaged-JAR NeoForge 1.21.1 `GameTestServer` E2E tests.
+
 ## 2.0.1
 
 - Fixed a startup/world-load crash on NeoForge `1.21.1+` when computing `PackFingerprint` for Jar-in-Jar nested mods whose `IModFile.getFilePath()` returns a virtual `UnionPath` (`toRealPath()` returning `null` and cross-filesystem `ProviderMismatchException` / attribute stat errors).

@@ -56,6 +56,8 @@ if [[ "$USE_CONTAINER" -eq 1 ]]; then
     "$ENGINE" build -f "$REPO_ROOT/Dockerfile.verify" -t "$IMAGE_NAME" "$REPO_ROOT"
     echo "[verify] Running full verification inside container (xvfb-run)..."
     exec "$ENGINE" run --rm --init \
+        -e ORG_GRADLE_PROJECT_neoform_decompile_maxMemory=2g \
+        -e GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx2560m" \
         -v "$REPO_ROOT:/workspace" \
         -v rinchan-gradle-cache-sdfu:/root/.gradle \
         -w /workspace \
