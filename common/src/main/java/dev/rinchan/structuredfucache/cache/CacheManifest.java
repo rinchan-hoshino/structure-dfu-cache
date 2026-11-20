@@ -3,6 +3,7 @@ package dev.rinchan.structuredfucache.cache;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -59,6 +60,8 @@ public final class CacheManifest {
         }
         try (BufferedReader reader = Files.newBufferedReader(manifestFile, StandardCharsets.UTF_8)) {
             return parseHeader(reader.readLine());
+        } catch (CharacterCodingException corruptEncoding) {
+            return Optional.empty();
         }
     }
 
@@ -85,6 +88,8 @@ public final class CacheManifest {
                 }
             }
             return new DiskCounts(header, converted, passthrough);
+        } catch (CharacterCodingException corruptEncoding) {
+            return new DiskCounts(Optional.empty(), 0, 0);
         }
     }
 
@@ -118,6 +123,8 @@ public final class CacheManifest {
                 entries.put(parts[0], new Entry(parts[1], status));
             }
             return entries;
+        } catch (CharacterCodingException corruptEncoding) {
+            return Map.of();
         }
     }
 

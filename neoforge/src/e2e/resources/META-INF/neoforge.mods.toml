@@ -1,0 +1,16 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT"
+
+[[mods]]
+modId = "structure_dfu_cache_e2e"
+version = "1.0.0"
+displayName = "Structure DFU Cache E2E Harness"
+description = "Packaged-JAR GameTest E2E verification harness"
+
+[[dependencies.structure_dfu_cache_e2e]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1,)"
+ordering = "NONE"
+side = "BOTH"

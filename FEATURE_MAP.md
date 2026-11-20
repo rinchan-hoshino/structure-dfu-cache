@@ -36,5 +36,19 @@
 
 ## Verification Matrix
 
-- **Unit Tests**: `StructureDfuCacheV2Test` (9 tests covering legacy upgrade & zero-write passthrough, corrupt/oversized NBT isolation, zero-read fast-path, incremental rebuild & orphan pruning, legacy 1.x cleanup & reload unwrap, worker budget & clamping, TOML config round-trip & master switch bypass, `PackFingerprint` determinism, and `CacheStats` disk inspection & cache clear) executed via NeoForge JUnit across `1.21.1`, `26.1.2`, and `26.2`.
-- **Release Audit (`scripts/build-matrix.py`)**: Builds all 8 targets and verifies each JAR is `< 100 KB`, contains `icon.png`, `structure_dfu_cache.mixins.json`, and all 4 `lang/*.json` files, with zero forbidden stub or external library classes.
+All three hard verification gates are wired directly into local `./gradlew check` and `scripts/build-matrix.py` (zero GitHub Actions workflows):
+
+- **Gate 1 — Packaged-JAR Real Runtime Black-Box E2E (`:neoforge:runGameTestServer` + `StructureDfuCacheConfigScreenTest`)**:
+  - Boots a headless Minecraft `1.21.1` NeoForge `GameTestServer` with `loadedMods = []`, loading only the final packaged `structure_dfu_cache-neoforge-*.jar`, a real Jar-in-Jar nested fixture (`jij_e2e_host` -> `jij_e2e_nested`), and the black-box `structure_dfu_cache_e2e` harness (`StructureDfuCacheE2eMod`).
+  - Verifies old `DataVersion` structures are DFU-upgraded into `overlay/`, current-version structures take zero-write `P` passthrough, warm `onResourceManagerReload` hits `manifest.v2` fast-path in `< 50ms`, and Brigadier `/structuredfucache status` / `/structuredfucache clear` enforce permission level `2`.
+  - `StructureDfuCacheConfigScreenTest` validates headless `StructureDfuCacheConfigScreen` construction, widget layout (`init()`), live on-disk `CacheStats` inspection, and `onClose()` with zero exceptions.
+  - Command: `./gradlew :neoforge:runGameTestServer -Pminecraft_version=1.21.1 -Ploader=neoforge --no-configuration-cache`
+- **Gate 2 — Property Invariant Fuzzing (`StructureDfuCachePropertyTest`, >= 1,200 fixed-seed iterations)**:
+  - Fixed-seed randomized bombardment covering `manifest.v2` corruption/truncation/invalid UTF-8/version jumps (400 iterations + full Bootstrap recovery), orphan overlay pruning & incremental rebuilds (250 iterations), corrupt/truncated GZIP & `>32 MiB` decoded NBT bombs (150+ iterations), and heterogeneous `FileSystem` / `UnionPath` inputs (400 iterations).
+  - Command: `./gradlew :neoforge:test --tests "*StructureDfuCachePropertyTest*" -Pminecraft_version=1.21.1 -Ploader=neoforge --no-configuration-cache`
+- **Gate 3 — Bytecode & Packaged Artifact Guardrails (`ArchitectureContractTest`)**:
+  - Scans the freshly built packaged `.jar` constant pool to enforce Dedicated Server isolation (zero `net/minecraft/client/` or client-only references in non-client classes), Mixin bidirectional closure (`structure_dfu_cache.mixins.json` <-> `@Mixin` classes), and clean artifact hygiene (zero `rinlib`, zero `modmenu` stubs, `< 100 KB`, required `icon.png` + 4 `lang/*.json`).
+  - Command: `./gradlew :neoforge:test --tests "*ArchitectureContractTest*" -Pminecraft_version=1.21.1 -Ploader=neoforge --no-configuration-cache`
+- **Full Local Gate Entry Points**:
+  - Single-target full verification: `./gradlew :neoforge:check -Pminecraft_version=1.21.1 -Ploader=neoforge --no-configuration-cache`
+  - Full 8-target release matrix & audit: `python3 scripts/build-matrix.py`

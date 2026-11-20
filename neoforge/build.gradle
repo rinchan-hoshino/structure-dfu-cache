@@ -57,6 +57,14 @@ neoForge {
             server()
             programArgument '--nogui'
         }
+        if (root.minecraft_version == '1.21.1') {
+            gameTestServer {
+                type = 'gameTestServer'
+                gameDirectory = layout.buildDirectory.dir('e2e-gametest-run')
+                loadedMods = []
+                systemProperty 'neoforge.enabledGameTestNamespaces', 'structure_dfu_cache_e2e'
+            }
+        }
         configureEach {
             logLevel = org.slf4j.event.Level.INFO
         }
@@ -72,7 +80,157 @@ dependencies {
 }
 
 tasks.named('test', Test) {
+    dependsOn tasks.named('jar')
     useJUnitPlatform()
+    doFirst {
+        systemProperty 'structure_dfu_cache.packagedJar', tasks.named('jar').get().archiveFile.get().asFile.absolutePath
+    }
+}
+
+if (root.minecraft_version == '1.21.1') {
+    def writeGzipStructureNbt = { File outFile, int dataVersion, String blockName ->
+        outFile.parentFile.mkdirs()
+        outFile.withOutputStream { fos ->
+            new java.util.zip.GZIPOutputStream(fos).withStream { gz ->
+                def dos = new java.io.DataOutputStream(gz)
+                // Root compound ""
+                dos.writeByte(10); dos.writeUTF('')
+                // DataVersion
+                dos.writeByte(3); dos.writeUTF('DataVersion'); dos.writeInt(dataVersion)
+                // size: [1, 1, 1]
+                dos.writeByte(9); dos.writeUTF('size'); dos.writeByte(3); dos.writeInt(3)
+                dos.writeInt(1); dos.writeInt(1); dos.writeInt(1)
+                // palette: [{Name: blockName}]
+                dos.writeByte(9); dos.writeUTF('palette'); dos.writeByte(10); dos.writeInt(1)
+                dos.writeByte(8); dos.writeUTF('Name'); dos.writeUTF(blockName)
+                dos.writeByte(0)
+                // blocks: [{pos: [0, 0, 0], state: 0}]
+                dos.writeByte(9); dos.writeUTF('blocks'); dos.writeByte(10); dos.writeInt(1)
+                dos.writeByte(9); dos.writeUTF('pos'); dos.writeByte(3); dos.writeInt(3)
+                dos.writeInt(0); dos.writeInt(0); dos.writeInt(0)
+                dos.writeByte(3); dos.writeUTF('state'); dos.writeInt(0)
+                dos.writeByte(0)
+                // end root
+                dos.writeByte(0)
+                dos.flush()
+            }
+        }
+    }
+
+    sourceSets {
+        e2e {
+            compileClasspath += sourceSets.main.compileClasspath
+            runtimeClasspath += sourceSets.main.runtimeClasspath
+        }
+    }
+
+    def generateE2eStructures = tasks.register('generateE2eStructures') {
+        def outDir = layout.buildDirectory.dir('generated/e2e-resources')
+        outputs.dir(outDir)
+        doLast {
+            writeGzipStructureNbt(new File(outDir.get().asFile, 'data/structure_dfu_cache_e2e/structure/empty.nbt'), 3955, 'minecraft:air')
+        }
+    }
+
+    sourceSets.e2e.resources.srcDir(generateE2eStructures)
+
+    def e2eJar = tasks.register('e2eJar', Jar) {
+        dependsOn tasks.named('e2eClasses'), generateE2eStructures
+        archiveBaseName = 'structure_dfu_cache_e2e'
+        archiveVersion = '1.0.0'
+        destinationDirectory = layout.buildDirectory.dir('e2e-libs')
+        from sourceSets.e2e.output
+    }
+
+    def generateJijFixtureJar = tasks.register('generateJijFixtureJar') {
+        def outJar = layout.buildDirectory.file('e2e-libs/jij_e2e_host-1.0.0.jar')
+        outputs.file(outJar)
+        doLast {
+            def workDir = temporaryDir
+            workDir.deleteDir()
+            workDir.mkdirs()
+
+            // 1. Build nested mod JAR (jij_e2e_nested) with legacy (DataVersion=1500) & current (DataVersion=3955) structures.
+            def nestedDir = new File(workDir, 'nested')
+            new File(nestedDir, 'META-INF').mkdirs()
+            new File(nestedDir, 'META-INF/neoforge.mods.toml').text = '''modLoader="lowcodefml"
+loaderVersion="[1,)"
+license="MIT"
+[[mods]]
+modId="jij_e2e_nested"
+version="1.0.0"
+displayName="JiJ E2E Nested Mod"
+'''
+            writeGzipStructureNbt(new File(nestedDir, 'data/jij_e2e_nested/structure/legacy_keep.nbt'), 1500, 'minecraft:stone')
+            writeGzipStructureNbt(new File(nestedDir, 'data/jij_e2e_nested/structure/current_keep.nbt'), 3955, 'minecraft:stone')
+
+            def nestedJar = new File(workDir, 'jij_e2e_nested-1.0.0.jar')
+            ant.zip(destfile: nestedJar, basedir: nestedDir)
+
+            // 2. Build host mod JAR (jij_e2e_host) embedding nestedJar via NeoForge Jar-in-Jar metadata.json.
+            def hostDir = new File(workDir, 'host')
+            new File(hostDir, 'META-INF/jarjar').mkdirs()
+            new File(hostDir, 'META-INF/neoforge.mods.toml').text = '''modLoader="lowcodefml"
+loaderVersion="[1,)"
+license="MIT"
+[[mods]]
+modId="jij_e2e_host"
+version="1.0.0"
+displayName="JiJ E2E Host Mod"
+'''
+            new File(hostDir, 'META-INF/jarjar/metadata.json').text = '''{
+  "jars": [
+    {
+      "identifier": {
+        "group": "dev.rinchan.e2e",
+        "artifact": "jij_e2e_nested"
+      },
+      "version": {
+        "range": "[1.0.0,)",
+        "artifactVersion": "1.0.0"
+      },
+      "path": "META-INF/jarjar/jij_e2e_nested-1.0.0.jar",
+      "isObfuscated": false
+    }
+  ]
+}
+'''
+            nestedJar.withInputStream { ins ->
+                new File(hostDir, 'META-INF/jarjar/jij_e2e_nested-1.0.0.jar').withOutputStream { outs -> outs << ins }
+            }
+
+            def dest = outJar.get().asFile
+            dest.parentFile.mkdirs()
+            ant.zip(destfile: dest, basedir: hostDir)
+        }
+    }
+
+    def preparePackagedE2eGameTest = tasks.register('preparePackagedE2eGameTest') {
+        dependsOn tasks.named('jar'), e2eJar, generateJijFixtureJar
+        doLast {
+            def runDir = layout.buildDirectory.dir('e2e-gametest-run').get().asFile
+            new File(runDir, 'mods').deleteDir()
+            new File(runDir, 'cache').deleteDir()
+            new File(runDir, 'world').deleteDir()
+            def modsDir = new File(runDir, 'mods')
+            modsDir.mkdirs()
+            project.copy {
+                from tasks.named('jar').get().archiveFile
+                from e2eJar.get().archiveFile
+                from generateJijFixtureJar.get().outputs.files
+                into modsDir
+            }
+        }
+    }
+
+    afterEvaluate {
+        tasks.matching { it.name == 'runGameTestServer' }.configureEach {
+            dependsOn preparePackagedE2eGameTest
+        }
+        tasks.named('check') {
+            dependsOn 'runGameTestServer'
+        }
+    }
 }
 
 publishing {
