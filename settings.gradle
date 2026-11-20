@@ -2,7 +2,9 @@ pluginManagement {
     repositories {
         mavenLocal()
         gradlePluginPortal()
+        maven { url = 'https://maven.fabricmc.net/' }
         maven { url = 'https://maven.neoforged.net/releases' }
+        maven { url = 'https://maven.minecraftforge.net/' }
     }
 }
 
@@ -11,3 +13,20 @@ plugins {
 }
 
 rootProject.name = 'structure-dfu-cache'
+
+def profiles = new groovy.json.JsonSlurper().parse(file('profiles.json'))
+def mcVersion = providers.gradleProperty('minecraft_version').getOrElse('1.21.1')
+def profile = profiles[mcVersion]
+if (profile == null) throw new GradleException("Unsupported Minecraft profile: ${mcVersion}")
+
+def selectedLoader = providers.gradleProperty('loader').getOrElse('all')
+if (!(selectedLoader in ['all', 'fabric', 'forge', 'neoforge'])) {
+    throw new GradleException("Unsupported loader: ${selectedLoader}")
+}
+
+List<String> targetLoaders = selectedLoader == 'all' ? (profile.loaders as List<String>) : [selectedLoader]
+for (String loaderName : targetLoaders) {
+    if (loaderName in (profile.loaders as List<String>)) {
+        include loaderName
+    }
+}

@@ -1,0 +1,74 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+def root = rootProject
+def unobfuscated = root.minecraft_version.startsWith('26.')
+apply plugin: unobfuscated ? 'net.fabricmc.fabric-loom' : 'fabric-loom'
+
+loom.interfaceInjection.getIsEnabled().set(false)
+
+def modId = root.property('mod_id')
+def apiLayer = root.api_layer
+
+base {
+    archivesName = "${modId}-fabric"
+}
+
+sourceSets {
+    modmenuStub {
+        java.srcDir 'src/modmenuStub/java'
+    }
+    main {
+        java.srcDir root.file('common/src/main/java')
+        java.srcDir root.file("common/src/${apiLayer}/java")
+        resources.srcDir root.file('common/src/main/resources')
+        resources.srcDir root.file("common/src/${apiLayer}/resources")
+        compileClasspath += modmenuStub.output
+    }
+}
+
+if (!unobfuscated) loom {
+    mixin {
+        useLegacyMixinAp = true
+        defaultRefmapName.set("${modId}.refmap.json")
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${root.property('minecraft_version')}"
+    if (!unobfuscated) mappings loom.officialMojangMappings()
+    add(unobfuscated ? 'implementation' : 'modImplementation', "net.fabricmc:fabric-loader:${root.property('fabric_loader_version')}")
+    compileOnly "net.fabricmc:sponge-mixin:0.17.3+mixin.0.8.7"
+}
+
+sourceSets.modmenuStub.compileClasspath = configurations.compileClasspath
+
+def resourceProperties = [
+    mod_id                   : modId,
+    mod_name                 : root.property('mod_name'),
+    mod_version              : root.property('mod_version'),
+    mod_license              : root.property('mod_license'),
+    mod_authors              : root.property('mod_authors'),
+    mod_description          : root.property('mod_description'),
+    minecraft_version        : root.fabric_minecraft_range,
+    java_version             : root.java_version,
+    fabric_loader_min_version: root.property('fabric_loader_min_version')
+]
+
+processResources {
+    inputs.properties(resourceProperties)
+    filesMatching('fabric.mod.json') {
+        expand resourceProperties
+    }
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifactId = "${modId}-fabric"
+            from components.java
+        }
+    }
+}

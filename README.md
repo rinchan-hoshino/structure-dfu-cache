@@ -1,34 +1,63 @@
 # Structure DFU Cache
 
-Reduce repeated structure DataFixerUpper work during startup and `/reload` by caching converted structure NBT, with safe validation and vanilla fallback.
+![Structure DFU Cache Icon](docs/icon.png)
 
-## How it works
+Eliminates repeated Minecraft structure DataFixerUpper (DFU) conversions during world loading and `/reload` by pre-upgrading legacy structure NBT templates once into a single-layer overlay cache — with sub-5ms zero-read warm startups, a live native health dashboard, and zero external dependencies.
 
-- Validates a single-line `manifest.v2` header against the current pack stack, mod files, and datapack metadata (`PackFingerprint`) for a sub-5ms zero-read warm-boot mount.
-- On cold start or pack changes, scans `structure/*.nbt` once and writes only structures with `DataVersion < targetDataVersion` into a single `overlay/data/<namespace>/<path>` layer.
-- Current-version, non-template, corrupt, or oversized structures are recorded as `P` (passthrough) in `manifest.v2` with zero bytes written to disk and are not re-decoded on subsequent runs.
-- Serves upgraded structures via a lightweight `StructureOverlayResourceManager` wrapper, automatically unwrapping across `/reload` and cleaning up legacy `1.x` cache directories.
+## Highlights
+
+- **Sub-5ms warm-boot fast path**: Validates line 1 of `cache/structure_dfu_cache/manifest.v2` against `PackFingerprint` (active pack stack + mod files + datapack metadata) without reading or decoding a single NBT file.
+- **Single-layer overlay (`overlay/data/<ns>/<path>`)**: Only materializes structure templates with `DataVersion < targetDataVersion`. Current-version, non-template, corrupt, and oversized (`>32 MiB` decoded / `>64 MiB` compressed) files are recorded as `P` (passthrough) with zero disk writes.
+- **Heap-safe & process-safe**: Adaptive `1–4` worker concurrency (automatically throttled to `1` worker when `-Xmx <= 6.8G` or heap headroom `< 2.5G`), `prepare.lock` cross-process lock, orphan file pruning, and automatic cleanup of legacy `1.x` cache directories (`blobs/`, `sources/`, `generations/`, `index.json`).
+- **Native Config & Health Dashboard**: Built-in zero-dependency screen accessible via Mod Menu (Fabric), Forge, and NeoForge. Displays live/on-disk status, last prepare time (`ms`), accelerated/passthrough counts, `overlay/` disk usage, hot-save toggles, and a one-click **Clear Cache** button.
+- **Server OP Diagnostics**: Native Brigadier `/structuredfucache status` and `/structuredfucache clear` (permission level 2), completely invisible to non-OP players.
+- **Zero External Dependencies**: Pure single JAR (`< 100 KB`), no Fabric API, no Cloth Config, no library mods required.
+- **4-Language Localization**: English (`en_us`), Simplified Chinese (`zh_cn`), Traditional Chinese (`zh_tw`), Japanese (`ja_jp`).
+
+## Supported Matrix (8 Targets)
+
+| Minecraft | Fabric | Forge | NeoForge | Java |
+| --- | --- | --- | --- | --- |
+| `1.20.1` | Yes | Yes (`47.4+`) | — | Java 17 |
+| `1.21.1` | Yes | — | Yes (`21.1+`) | Java 21 |
+| `26.1.2` | Yes | — | Yes (`26.1.2+`) | Java 25 |
+| `26.2` | Yes | — | Yes (`26.2+`) | Java 25 |
 
 ## Configuration
 
-There is no configuration file. Drop the jar into a pack or server. Removing the jar removes every runtime behaviour; the files under `cache/structure_dfu_cache/` are then inert and can be deleted with the game stopped.
+Generated automatically at `config/structure_dfu_cache.toml` (also editable in-game via the native Config Screen):
+
+```toml
+# Master switch. When false, bypasses the overlay and uses vanilla resources directly.
+enabled = true
+
+# Maximum worker threads during cold/incremental cache builds.
+# 0 = auto-adaptive (1..4 based on JVM heap headroom); 1..8 = explicit cap.
+maxWorkers = 0
+
+# When true, logs extra build diagnostics at INFO level.
+verboseLogging = false
+```
+
+## OP Commands
+
+Requires permission level 2 (gamemaster / operator):
+
+- `/structuredfucache status` — Shows current mount mode, last prepare duration, accelerated/passthrough counts, `overlay/` disk size, and worker setting.
+- `/structuredfucache clear` — Clears `cache/structure_dfu_cache/` so the overlay rebuilds on the next world load or `/reload`.
+
+## Safety Limits
 
 | Limit | Value |
 | --- | --- |
-| Compressed input per structure | 64 MiB |
-| Decoded NBT per structure | 32 MiB (`NbtAccounter` cap) |
-| Preparation workers | 1 (when `-Xmx <= 6.8G` or headroom `< 2.5G`), otherwise 2 to 4 |
+| Max compressed structure size | `64 MiB` |
+| Max decoded NBT size | `32 MiB` (`NbtAccounter` cap) |
+| Default worker budget | `1` when `-Xmx <= 6.8G` or headroom `< 2.5G`, else `2–4` |
 
 ## Compatibility
 
-- Minecraft 1.21.1
-- NeoForge 21.1.248 or later in the 21.1 series
-- Java 21
-- No other mods or libraries are required.
-
-## Download
-
-- [GitHub releases](https://github.com/rinchan-hoshino/structure-dfu-cache/releases)
+- Works alongside **Lithium**, **ModernFix**, **C2ME**, **FerriteCore**, and **LazyDFU** without overlap.
+- Removing the JAR leaves vanilla worlds untouched; `cache/structure_dfu_cache/` can be deleted safely at any time while the game is stopped.
 
 ## License
 

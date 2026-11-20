@@ -2,20 +2,35 @@
 
 ## 2.0.0
 
-- Replace `blobs/`, `sources/`, `generations/<uuid>`, and `index.json` with a single `overlay/data/<ns>/<path>` layer and streaming `manifest.v2` line format.
-- Add sub-5ms warm-boot fast-path mounting by checking only line 1 of `manifest.v2` against `PackFingerprint` (zero structure file reads or NBT decoding).
-- Only materialize structures with `DataVersion < targetDataVersion`; record current-version, non-template, corrupt, and oversized (`>32 MiB` decoded) NBT as `P` with zero disk writes.
-- Force single-threaded streaming conversion with immediate buffer release on `<=6.8G` heaps, drop per-file `fsync`, and auto-clean legacy `1.x` cache directories.
+### Core v2 Engine
+- Replaced legacy `blobs/`, `sources/`, `generations/<uuid>`, and `index.json` with a single `overlay/data/<ns>/<path>` layer and streaming `manifest.v2` line format.
+- Added sub-5ms warm-boot fast-path mounting by validating line 1 of `manifest.v2` against `PackFingerprint` (zero structure file reads or NBT decoding).
+- Only materializes structures with `DataVersion < targetDataVersion`; records current-version, non-template, corrupt, and oversized (`>32 MiB` decoded / `>64 MiB` compressed) NBT as `P` (passthrough) with zero disk writes.
+- Added adaptive `1–4` worker concurrency (single-threaded streaming on `<=6.8G` heaps), `prepare.lock` process locking, orphan file pruning, and automatic legacy `1.x` cache directory cleanup.
+
+### Cross-Platform 8-Target Matrix
+- Decoupled `PackFingerprint` and runtime metadata from NeoForge via `PlatformBridge` (`FabricLoader` / Forge `ModList` / NeoForge `ModList`) and `McCompat` (`v120` plural `structures/`, `v121` singular `structure/`, `v26` `Identifier` + `WorldVersion` record).
+- Expanded to 8 zero-dependency single-JAR targets:
+  - `1.20.1`: Fabric, Forge
+  - `1.21.1`: Fabric, NeoForge
+  - `26.1.2`: Fabric, NeoForge
+  - `26.2`: Fabric, NeoForge
+
+### Configuration, Health Dashboard, Commands & Polish
+- Added zero-dependency commented `config/structure_dfu_cache.toml` (`enabled`, `maxWorkers`, `verboseLogging`).
+- Added native Config & Live Health Dashboard screen (Mod Menu compile-only stub on Fabric + native Forge/NeoForge extension points) displaying live/on-disk stats and a one-click **Clear Cache** action.
+- Added Brigadier OP diagnostic commands `/structuredfucache status` and `/structuredfucache clear` (permission level 2, zero Fabric API dependency).
+- Added 4-language localization (`en_us`, `zh_cn`, `zh_tw`, `ja_jp`) and removed hardcoded overlay pack names.
+- Replaced artwork with an original `64x64` pixel-art rounded stone badge icon (`512x512` nearest-neighbor).
+
+## 1.2.0 / 1.1.0
+
+- Earlier multi-loader `1.x` content-addressed cache releases (`blobs/`, `generations/`, `index.json`), now automatically cleaned up on upgrade to `2.0.0`.
 
 ## 1.0.1
 
-- Verify every prepared cache blob against its persisted SHA-256 before reuse.
-- Rebuild tampered or truncated blobs instead of exposing them through the generated resource layer.
-- Advance the cache format so pre-integrity indexes are ignored and rebuilt automatically.
-- Add bounded failure coverage for changed runtime identity, corrupt indexes, and unusable cache roots.
+- Verified persisted cache blobs against SHA-256 before reuse and added failure isolation coverage.
 
 ## 1.0.0
 
-- Build a persistent, content-addressed cache of structure NBT upgraded by Minecraft's official structure DataFixer.
-- Preserve vanilla resource-pack resolution and fall back to the original resource manager if a complete prepared layer cannot be built.
-- Limit cache preparation to startup and explicit resource reload maintenance windows.
+- Initial persistent structure DFU cache release.
