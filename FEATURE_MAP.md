@@ -36,7 +36,11 @@
 
 ## Verification Matrix
 
-All three hard verification gates are wired directly into local `./gradlew check` and `scripts/build-matrix.py` (zero GitHub Actions workflows):
+All three hard verification gates are wired directly into local `./gradlew check`, `scripts/build-matrix.py`, `.githooks/pre-push`, and `scripts/verify.sh [--container]`:
+
+- **Developer Setup & Full Verification**:
+  - Enable local `pre-push` hook: `./scripts/setup-hooks.sh`
+  - Run full verification natively or in reproducible container (`Dockerfile.verify` + `xvfb-run`): `./scripts/verify.sh [--container]`
 
 - **Gate 1 — Packaged-JAR Real Runtime Black-Box E2E (`:neoforge:runGameTestServer` + `StructureDfuCacheConfigScreenTest`)**:
   - Boots a headless Minecraft `1.21.1` NeoForge `GameTestServer` with `loadedMods = []`, loading only the final packaged `structure_dfu_cache-neoforge-*.jar`, a real Jar-in-Jar nested fixture (`jij_e2e_host` -> `jij_e2e_nested`), and the black-box `structure_dfu_cache_e2e` harness (`StructureDfuCacheE2eMod`).

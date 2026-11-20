@@ -59,6 +59,20 @@ Requires permission level 2 (gamemaster / operator):
 - Works alongside **Lithium**, **ModernFix**, **C2ME**, **FerriteCore**, and **LazyDFU** without overlap.
 - Removing the JAR leaves vanilla worlds untouched; `cache/structure_dfu_cache/` can be deleted safely at any time while the game is stopped.
 
+## Building & Verification
+
+Enable the local `pre-push` verification hook once after cloning:
+
+```bash
+./scripts/setup-hooks.sh
+```
+
+Run the full multi-target build, JUnit + property fuzzing (`>= 1,200` iterations), bytecode architecture contracts, and packaged-JAR NeoForge `1.21.1` GameTest E2E suite (auto-falls back to Docker/Podman when host JDK 17/21/25 are unavailable, or force containerized `xvfb-run` execution with `--container`):
+
+```bash
+./scripts/verify.sh [--container]
+```
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
