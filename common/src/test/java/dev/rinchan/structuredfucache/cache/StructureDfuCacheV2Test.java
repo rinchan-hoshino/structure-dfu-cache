@@ -14,9 +14,13 @@ import dev.rinchan.structuredfucache.config.StructureDfuCacheConfig;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.ProviderMismatchException;
+import java.nio.file.spi.FileSystemProvider;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -285,6 +289,197 @@ class StructureDfuCacheV2Test {
             String fp3 = PackFingerprint.compute(raw, gameDir, List.of(fakeMod));
             assertNotEquals(fp1, fp3, "Changing mod jar size must invalidate fingerprint");
         }
+    }
+
+    @Test
+    void packFingerprintHandlesUnionPathWithNullRealPathAndForeignFileSystem() throws Exception {
+        Path gameDir = tempDir.resolve("game-union");
+        Files.createDirectories(gameDir.resolve("mods"));
+
+        Path packDir = tempDir.resolve("pack-union");
+        writePackStructure(packDir, new StructureKey("example", "structure/a.nbt"), gzipStructureNbt(1500, "minecraft:stone"));
+
+        FileSystemProvider foreignProvider = new FileSystemProvider() {
+            @Override
+            public String getScheme() {
+                return "union";
+            }
+
+            @Override
+            public FileSystem newFileSystem(java.net.URI uri, Map<String, ?> env) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public FileSystem getFileSystem(java.net.URI uri) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public Path getPath(java.net.URI uri) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public java.nio.channels.SeekableByteChannel newByteChannel(Path path, Set<? extends java.nio.file.OpenOption> options, java.nio.file.attribute.FileAttribute<?>... attrs) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public java.nio.file.DirectoryStream<Path> newDirectoryStream(Path dir, java.nio.file.DirectoryStream.Filter<? super Path> filter) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void createDirectory(Path dir, java.nio.file.attribute.FileAttribute<?>... attrs) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void delete(Path path) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void copy(Path source, Path target, java.nio.file.CopyOption... options) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void move(Path source, Path target, java.nio.file.CopyOption... options) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public boolean isSameFile(Path path, Path path2) {
+                return false;
+            }
+
+            @Override
+            public boolean isHidden(Path path) {
+                return false;
+            }
+
+            @Override
+            public java.nio.file.FileStore getFileStore(Path path) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void checkAccess(Path path, java.nio.file.AccessMode... modes) {
+                throw new ProviderMismatchException("virtual union access");
+            }
+
+            @Override
+            public <V extends java.nio.file.attribute.FileAttributeView> V getFileAttributeView(Path path, Class<V> type, java.nio.file.LinkOption... options) {
+                return null;
+            }
+
+            @Override
+            public <A extends java.nio.file.attribute.BasicFileAttributes> A readAttributes(Path path, Class<A> type, java.nio.file.LinkOption... options) {
+                throw new ProviderMismatchException("virtual union attributes");
+            }
+
+            @Override
+            public Map<String, Object> readAttributes(Path path, String attributes, java.nio.file.LinkOption... options) {
+                throw new ProviderMismatchException("virtual union attributes");
+            }
+
+            @Override
+            public void setAttribute(Path path, String attribute, Object value, java.nio.file.LinkOption... options) {
+                throw new UnsupportedOperationException();
+            }
+        };
+
+        FileSystem foreignFs = new FileSystem() {
+            @Override
+            public FileSystemProvider provider() {
+                return foreignProvider;
+            }
+
+            @Override
+            public void close() {
+            }
+
+            @Override
+            public boolean isOpen() {
+                return true;
+            }
+
+            @Override
+            public boolean isReadOnly() {
+                return true;
+            }
+
+            @Override
+            public String getSeparator() {
+                return "/";
+            }
+
+            @Override
+            public Iterable<Path> getRootDirectories() {
+                return List.of();
+            }
+
+            @Override
+            public Iterable<java.nio.file.FileStore> getFileStores() {
+                return List.of();
+            }
+
+            @Override
+            public Set<String> supportedFileAttributeViews() {
+                return Set.of();
+            }
+
+            @Override
+            public Path getPath(String first, String... more) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public java.nio.file.PathMatcher getPathMatcher(String syntaxAndPattern) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public java.nio.file.attribute.UserPrincipalLookupService getUserPrincipalLookupService() {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public java.nio.file.WatchService newWatchService() {
+                throw new UnsupportedOperationException();
+            }
+        };
+
+        Path unionPath = mockUnionPath(foreignFs, "/mods/balm-neoforge-1.21.1.jar!/META-INF/jarjar/kuma_api-neoforge-21.0.5.jar");
+        Path otherUnionPath = mockUnionPath(foreignFs, "/mods/balm-neoforge-1.21.1.jar!/META-INF/jarjar/other-1.0.0.jar");
+
+        try (var raw = new MultiPackResourceManager(PackType.SERVER_DATA, List.of(pack("test", packDir)))) {
+            String fp1 = PackFingerprint.compute(raw, gameDir, List.of(unionPath));
+            String fp2 = PackFingerprint.compute(raw, gameDir, List.of(unionPath));
+            String fp3 = PackFingerprint.compute(raw, gameDir, List.of(otherUnionPath));
+            assertEquals(fp1, fp2, "UnionPath fingerprint must be deterministic");
+            assertNotEquals(fp1, fp3, "Different UnionPath virtual locations must produce different fingerprints");
+        }
+    }
+
+    private static Path mockUnionPath(FileSystem foreignFs, String displayPath) {
+        return (Path) Proxy.newProxyInstance(
+            Path.class.getClassLoader(),
+            new Class<?>[]{Path.class},
+            (proxy, method, args) -> switch (method.getName()) {
+                case "getFileSystem" -> foreignFs;
+                case "toRealPath" -> null; // Reproduces cpw.mods.niofs.union.UnionPath.toRealPath() returning null
+                case "toAbsolutePath", "normalize" -> proxy;
+                case "startsWith", "relativize" -> throw new ProviderMismatchException("Cross-filesystem operation not allowed");
+                case "getFileName" -> null;
+                case "toString" -> displayPath;
+                case "equals" -> args != null && args.length == 1 && proxy == args[0];
+                case "hashCode" -> System.identityHashCode(proxy);
+                default -> null;
+            }
+        );
     }
 
     @Test

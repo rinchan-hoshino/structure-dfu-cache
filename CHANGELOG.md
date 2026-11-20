@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.1
+
+- Fixed a startup/world-load crash on NeoForge `1.21.1+` when computing `PackFingerprint` for Jar-in-Jar nested mods whose `IModFile.getFilePath()` returns a virtual `UnionPath` (`toRealPath()` returning `null` and cross-filesystem `ProviderMismatchException` / attribute stat errors).
+- Hardened `PackFingerprint` path normalization, relativization, and file metadata stat collection against non-default `FileSystem` providers.
+
 ## 2.0.0
 
 ### Core v2 Engine

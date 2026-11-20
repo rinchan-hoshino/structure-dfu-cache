@@ -5,6 +5,7 @@ import dev.rinchan.structuredfucache.StructureDfuCache;
 import dev.rinchan.structuredfucache.compat.McCompat;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -63,7 +64,7 @@ public final class PackFingerprint {
                 if (rawPath == null) {
                     continue;
                 }
-                Path path = toRealPathQuietly(rawPath.toAbsolutePath().normalize());
+                Path path = toRealPathQuietly(normalizeQuietly(rawPath));
                 String key = relativizeKey(path, normalizedGameDir, realGameDir);
                 modEntries.add(new ModEntry(key, path));
             }
@@ -84,15 +85,53 @@ public final class PackFingerprint {
         return hex;
     }
 
-    private static String relativizeKey(Path path, Path normalizedGameDir, Path realGameDir) {
-        if (realGameDir != null && path.startsWith(realGameDir)) {
-            return realGameDir.relativize(path).toString();
+    private static String relativizeKey(Path rawPath, Path normalizedGameDir, Path realGameDir) {
+        if (rawPath == null) {
+            return "";
         }
-        if (normalizedGameDir != null && path.startsWith(normalizedGameDir)) {
-            return normalizedGameDir.relativize(path).toString();
+        try {
+            Path normPath = normalizeQuietly(rawPath);
+            if (realGameDir != null && sameFileSystem(normPath, realGameDir) && normPath.startsWith(realGameDir)) {
+                return realGameDir.relativize(normPath).toString().replace('\\', '/');
+            }
+            if (normalizedGameDir != null && sameFileSystem(normPath, normalizedGameDir) && normPath.startsWith(normalizedGameDir)) {
+                return normalizedGameDir.relativize(normPath).toString().replace('\\', '/');
+            }
+            if (sameFileSystem(normPath, normalizedGameDir) || sameFileSystem(normPath, realGameDir)) {
+                Path fileName = normPath.getFileName();
+                if (fileName != null) {
+                    return fileName.toString().replace('\\', '/');
+                }
+            }
+            return normPath.toString().replace('\\', '/');
+        } catch (RuntimeException ignored) {
+            return rawPath.toString().replace('\\', '/');
         }
-        Path fileName = path.getFileName();
-        return fileName != null ? fileName.toString() : path.toString();
+    }
+
+    private static boolean sameFileSystem(Path first, Path second) {
+        if (first == null || second == null) {
+            return false;
+        }
+        FileSystem firstFs = first.getFileSystem();
+        FileSystem secondFs = second.getFileSystem();
+        return firstFs != null && firstFs.equals(secondFs);
+    }
+
+    private static Path normalizeQuietly(Path path) {
+        if (path == null) {
+            return null;
+        }
+        try {
+            Path abs = path.toAbsolutePath();
+            return (abs != null ? abs : path).normalize();
+        } catch (Exception ignored) {
+            try {
+                return path.normalize();
+            } catch (Exception ignoredAgain) {
+                return path;
+            }
+        }
     }
 
     private static String normalizeGameDirString(String value, Path normalizedGameDir, Path realGameDir) {
@@ -111,39 +150,45 @@ public final class PackFingerprint {
             return null;
         }
         try {
-            return path.toRealPath();
-        } catch (IOException ignored) {
+            Path real = path.toRealPath();
+            return real != null ? real : path;
+        } catch (Exception ignored) {
             return path;
         }
     }
 
     private static void feedDirectoryStats(MessageDigest digest, String label, Path root, String suffixFilter) {
         update(digest, label);
-        if (!Files.isDirectory(root)) {
-            return;
-        }
-        try (Stream<Path> walk = Files.walk(root)) {
-            List<Path> files = walk
-                .filter(Files::isRegularFile)
-                .filter(path -> suffixFilter == null || path.getFileName().toString().endsWith(suffixFilter))
-                .sorted(Comparator.comparing(path -> root.relativize(path).toString()))
-                .toList();
-            for (Path file : files) {
-                feedFileStat(digest, root.relativize(file).toString(), file);
+        try {
+            if (!Files.isDirectory(root)) {
+                return;
             }
-        } catch (IOException ignored) {
+            try (Stream<Path> walk = Files.walk(root)) {
+                List<Path> files = walk
+                    .filter(Files::isRegularFile)
+                    .filter(path -> suffixFilter == null || path.getFileName().toString().endsWith(suffixFilter))
+                    .sorted(Comparator.comparing(path -> root.relativize(path).toString()))
+                    .toList();
+                for (Path file : files) {
+                    feedFileStat(digest, root.relativize(file).toString(), file);
+                }
+            }
+        } catch (Exception ignored) {
             update(digest, "unreadable:" + root);
         }
     }
 
     private static void feedFileStat(MessageDigest digest, String key, Path file) {
         update(digest, key);
+        if (file == null) {
+            return;
+        }
         try {
             if (Files.isRegularFile(file)) {
                 update(digest, Long.toString(Files.size(file)));
                 update(digest, Long.toString(Files.getLastModifiedTime(file).toMillis()));
             }
-        } catch (IOException ignored) {
+        } catch (Exception ignored) {
             update(digest, "stat-error");
         }
     }
