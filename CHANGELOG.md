@@ -1,34 +1,36 @@
-## Structure DFU Cache 1.2.0
-
-### Features & Improvements
-- **TOML configuration**: Added `config/structure_dfu_cache.toml` (loaded on game startup; restart required after editing).
-- **Configurable processing limits**:
-  - `maxDecodedNbtMiB` (default `1024`): Positive integer in MiB tracking the NBT decoder's accounting of in-memory NBT objects and allocation overhead during processing (this does not measure total DFU memory).
-  - `maxCompressedResourceMiB` (default `64`): Positive integer in MiB setting the limit for compressed structure resource size.
-- **Concurrency & memory estimation**: Worker concurrency is budgeted based on available heap after deducting resident memory and a 2 GiB reserve, estimating total DFU memory at roughly 4x `maxDecodedNbtMiB` per worker (capped at 4 threads, leaving 1 CPU core free when more than 1 core is available). Higher quota values reduce worker concurrency to allocate more memory headroom.
-- **Fallback behavior**: Structures exceeding `maxCompressedResourceMiB` bypass startup pre-processing and are handed back to vanilla reading. Structures exceeding `maxDecodedNbtMiB` or failing conversion cache the raw compressed bytes as unoptimized resources to retry during future load or reload.
-
 # Changelog
 
-## 1.1.0 — 2026-10-05
+## 2.0.0
 
-- Share one cache implementation across Minecraft 1.20.1, 1.21.1, 26.1.2 and 26.2 using RinLib 1.2.0.
-- Add Fabric and Forge/NeoForge builds with a required RinLib dependency.
-- Cache only the structures selected by vanilla resource-pack priority and filters.
-- Isolate individual structure read, conversion, storage and materialization failures; healthy structures remain cached.
-- Summarize cache updates, repaired data and vanilla fallbacks in the server console.
-- Notify operators once when they log in if the current preparation encountered damage or fallback; clear the notice after healthy preparation.
-- Release generated resource layers on reload and shutdown while retaining verified persistent blobs.
+### Core v2 Engine
+- Replaced legacy `blobs/`, `sources/`, `generations/<uuid>`, and `index.json` with a single `overlay/data/<ns>/<path>` layer and streaming `manifest.v2` line format.
+- Added sub-5ms warm-boot fast-path mounting by validating line 1 of `manifest.v2` against `PackFingerprint` (zero structure file reads or NBT decoding).
+- Only materializes structures with `DataVersion < targetDataVersion`; records current-version, non-template, corrupt, and oversized (`>32 MiB` decoded / `>64 MiB` compressed) NBT as `P` (passthrough) with zero disk writes.
+- Added adaptive `1–4` worker concurrency (single-threaded streaming on `<=6.8G` heaps), `prepare.lock` process locking, orphan file pruning, and automatic legacy `1.x` cache directory cleanup.
 
-## 1.0.1 — 2026-08-29
+### Cross-Platform 8-Target Matrix
+- Decoupled `PackFingerprint` and runtime metadata from NeoForge via `PlatformBridge` (`FabricLoader` / Forge `ModList` / NeoForge `ModList`) and `McCompat` (`v120` plural `structures/`, `v121` singular `structure/`, `v26` `Identifier` + `WorldVersion` record).
+- Expanded to 8 zero-dependency single-JAR targets:
+  - `1.20.1`: Fabric, Forge
+  - `1.21.1`: Fabric, NeoForge
+  - `26.1.2`: Fabric, NeoForge
+  - `26.2`: Fabric, NeoForge
 
-- Verify every prepared cache blob against its persisted SHA-256 before reuse.
-- Rebuild tampered or truncated blobs instead of exposing them through the generated resource layer.
-- Advance the cache format so pre-integrity indexes are ignored and rebuilt automatically.
-- Add bounded failure coverage for changed runtime identity, corrupt indexes, and unusable cache roots.
+### Configuration, Health Dashboard, Commands & Polish
+- Added zero-dependency commented `config/structure_dfu_cache.toml` (`enabled`, `maxWorkers`, `verboseLogging`).
+- Added native Config & Live Health Dashboard screen (Mod Menu compile-only stub on Fabric + native Forge/NeoForge extension points) displaying live/on-disk stats and a one-click **Clear Cache** action.
+- Added Brigadier OP diagnostic commands `/structuredfucache status` and `/structuredfucache clear` (permission level 2, zero Fabric API dependency).
+- Added 4-language localization (`en_us`, `zh_cn`, `zh_tw`, `ja_jp`) and removed hardcoded overlay pack names.
+- Replaced artwork with an original `64x64` pixel-art rounded stone badge icon (`512x512` nearest-neighbor).
 
-## 1.0.0 — 2026-08-28
+## 1.2.0 / 1.1.0
 
-- Build a persistent, content-addressed cache of structure NBT upgraded by Minecraft's official structure DataFixer.
-- Preserve vanilla resource-pack resolution and fall back to the original resource manager if a complete prepared layer cannot be built.
-- Limit cache preparation to startup and explicit resource reload maintenance windows.
+- Earlier multi-loader `1.x` content-addressed cache releases (`blobs/`, `generations/`, `index.json`), now automatically cleaned up on upgrade to `2.0.0`.
+
+## 1.0.1
+
+- Verified persisted cache blobs against SHA-256 before reuse and added failure isolation coverage.
+
+## 1.0.0
+
+- Initial persistent structure DFU cache release.

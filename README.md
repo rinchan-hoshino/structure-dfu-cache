@@ -1,33 +1,64 @@
 # Structure DFU Cache
 
-<!-- PROJECT_PAGE_START -->
-Moves repetitive structure DataFixerUpper (DFU) migration to the startup phase and caches the result to improve TPS during heavy chunk loading.
+![Structure DFU Cache Icon](docs/icon.png)
 
-## How it works
+Eliminates repeated Minecraft structure DataFixerUpper (DFU) conversions during world loading and `/reload` by pre-upgrading legacy structure NBT templates once into a single-layer overlay cache — with sub-5ms zero-read warm startups, a live native health dashboard, and zero external dependencies.
 
-- Uniformly parses server structure resources during game startup or reload.
-- Provides and caches processed structures through a vanilla-compatible resource pack layer.
+## Highlights
+
+- **Sub-5ms warm-boot fast path**: Validates line 1 of `cache/structure_dfu_cache/manifest.v2` against `PackFingerprint` (active pack stack + mod files + datapack metadata) without reading or decoding a single NBT file.
+- **Single-layer overlay (`overlay/data/<ns>/<path>`)**: Only materializes structure templates with `DataVersion < targetDataVersion`. Current-version, non-template, corrupt, and oversized (`>32 MiB` decoded / `>64 MiB` compressed) files are recorded as `P` (passthrough) with zero disk writes.
+- **Heap-safe & process-safe**: Adaptive `1–4` worker concurrency (automatically throttled to `1` worker when `-Xmx <= 6.8G` or heap headroom `< 2.5G`), `prepare.lock` cross-process lock, orphan file pruning, and automatic cleanup of legacy `1.x` cache directories (`blobs/`, `sources/`, `generations/`, `index.json`).
+- **Native Config & Health Dashboard**: Built-in zero-dependency screen accessible via Mod Menu (Fabric), Forge, and NeoForge. Displays live/on-disk status, last prepare time (`ms`), accelerated/passthrough counts, `overlay/` disk usage, hot-save toggles, and a one-click **Clear Cache** button.
+- **Server OP Diagnostics**: Native Brigadier `/structuredfucache status` and `/structuredfucache clear` (permission level 2), completely invisible to non-OP players.
+- **Zero External Dependencies**: Pure single JAR (`< 100 KB`), no Fabric API, no Cloth Config, no library mods required.
+- **4-Language Localization**: English (`en_us`), Simplified Chinese (`zh_cn`), Traditional Chinese (`zh_tw`), Japanese (`ja_jp`).
+
+## Supported Matrix (8 Targets)
+
+| Minecraft | Fabric | Forge | NeoForge | Java |
+| --- | --- | --- | --- | --- |
+| `1.20.1` | Yes | Yes (`47.4+`) | — | Java 17 |
+| `1.21.1` | Yes | — | Yes (`21.1+`) | Java 21 |
+| `26.1.2` | Yes | — | Yes (`26.1.2+`) | Java 25 |
+| `26.2` | Yes | — | Yes (`26.2+`) | Java 25 |
 
 ## Configuration
 
-Starting in 1.2.0, processing limits can be configured in `config/structure_dfu_cache.toml` and are loaded on game startup (restart the game after editing):
+Generated automatically at `config/structure_dfu_cache.toml` (also editable in-game via the native Config Screen):
 
 ```toml
-# Maximum decoded NBT memory quota in MiB (tracks NBT decoder accounting of NBT objects and allocation overhead)
-maxDecodedNbtMiB = 1024
+# Master switch. When false, bypasses the overlay and uses vanilla resources directly.
+enabled = true
 
-# Maximum compressed structure resource size in MiB
-maxCompressedResourceMiB = 64
+# Maximum worker threads during cold/incremental cache builds.
+# 0 = auto-adaptive (1..4 based on JVM heap headroom); 1..8 = explicit cap.
+maxWorkers = 0
+
+# When true, logs extra build diagnostics at INFO level.
+verboseLogging = false
 ```
 
-- Both options must be positive integers in MiB.
-- `maxDecodedNbtMiB` tracks the NBT decoder's accounting of in-memory NBT objects and allocation overhead during processing (does not measure total DFU memory).
-- Worker concurrency is estimated based on available heap after deducting resident memory and a 2 GiB reserve, budgeting roughly 4x `maxDecodedNbtMiB` per worker (capped at 4 threads, leaving 1 CPU core free when more than 1 core is available). Higher quota values reduce parallel workers to allocate more headroom for conversion.
-- When compressed resource size exceeds `maxCompressedResourceMiB`, startup pre-processing is skipped and handed back to vanilla structure reading. When decoded NBT exceeds `maxDecodedNbtMiB` or conversion fails, raw compressed bytes are cached as unoptimized resources and retried during subsequent load or reload.
+## OP Commands
 
-## Requirements
+Requires permission level 2 (gamemaster / operator):
 
-Install the following mod as a dependency:
+- `/structuredfucache status` — Shows current mount mode, last prepare duration, accelerated/passthrough counts, `overlay/` disk size, and worker setting.
+- `/structuredfucache clear` — Clears `cache/structure_dfu_cache/` so the overlay rebuilds on the next world load or `/reload`.
 
-- RinLib
-<!-- PROJECT_PAGE_END -->
+## Safety Limits
+
+| Limit | Value |
+| --- | --- |
+| Max compressed structure size | `64 MiB` |
+| Max decoded NBT size | `32 MiB` (`NbtAccounter` cap) |
+| Default worker budget | `1` when `-Xmx <= 6.8G` or headroom `< 2.5G`, else `2–4` |
+
+## Compatibility
+
+- Works alongside **Lithium**, **ModernFix**, **C2ME**, **FerriteCore**, and **LazyDFU** without overlap.
+- Removing the JAR leaves vanilla worlds untouched; `cache/structure_dfu_cache/` can be deleted safely at any time while the game is stopped.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).

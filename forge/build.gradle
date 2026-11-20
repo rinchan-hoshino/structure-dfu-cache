@@ -1,0 +1,71 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'net.neoforged.moddev.legacyforge'
+}
+
+def root = rootProject
+def modId = root.property('mod_id')
+def apiLayer = root.api_layer
+
+base {
+    archivesName = "${modId}-forge"
+}
+
+sourceSets.main.java.srcDir root.file('common/src/main/java')
+sourceSets.main.java.srcDir root.file("common/src/${apiLayer}/java")
+sourceSets.main.resources.srcDir root.file('common/src/main/resources')
+sourceSets.main.resources.srcDir root.file("common/src/${apiLayer}/resources")
+sourceSets.main.resources.srcDir tasks.register('generateModMetadata', ProcessResources) {
+    def replaceProperties = [
+        minecraft_version_range   : root.minecraft_version_range,
+        forge_version_range       : root.property('forge_version_range'),
+        forge_loader_version_range: root.property('forge_loader_version_range'),
+        mod_id                    : modId,
+        mod_name                  : root.property('mod_name'),
+        mod_license               : root.property('mod_license'),
+        mod_version               : root.property('mod_version'),
+        mod_authors               : root.property('mod_authors'),
+        mod_description           : root.property('mod_description')
+    ]
+    inputs.properties replaceProperties
+    filteringCharset = 'UTF-8'
+    expand replaceProperties
+    from 'src/main/templates'
+    into layout.buildDirectory.dir('generated/sources/modMetadata')
+}
+
+legacyForge {
+    version = "${root.property('minecraft_version')}-${root.forge_version}"
+    mods {
+        "${modId}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+legacyForge.ideSyncTask tasks.named('generateModMetadata')
+
+mixin {
+    add sourceSets.main, "${modId}.refmap.json"
+    config "${modId}.mixins.json"
+}
+
+jar {
+    manifest.attributes([
+        'MixinConfigs': "${modId}.mixins.json"
+    ])
+}
+
+dependencies {
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifactId = "${modId}-forge"
+            from components.java
+        }
+    }
+}

@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.rinchan.structuredfucache.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "refmap": "structure_dfu_cache.refmap.json",
+  "mixins": [
+    "CommandsMixin",
+    "StructureTemplateManagerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
