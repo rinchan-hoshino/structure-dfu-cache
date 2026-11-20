@@ -2,13 +2,13 @@
 
 ![Structure DFU Cache Icon](docs/icon.png)
 
-Eliminates repeated Minecraft structure DataFixerUpper (DFU) conversions during world loading and `/reload` by pre-upgrading legacy structure NBT templates once into a single-layer overlay cache — with sub-5ms zero-read warm startups, a live native health dashboard, and zero external dependencies.
+Eliminates repeated Minecraft structure DataFixerUpper (DFU) conversions during world loading and `/reload` by pre-upgrading outdated structure NBT templates once into a single-layer overlay cache — with sub-5ms zero-read warm startups, a live native health dashboard, and zero external dependencies.
 
 ## Highlights
 
 - **Sub-5ms warm-boot fast path**: Validates line 1 of `cache/structure_dfu_cache/manifest.v2` against `PackFingerprint` (active pack stack + mod files + datapack metadata) without reading or decoding a single NBT file.
 - **Single-layer overlay (`overlay/data/<ns>/<path>`)**: Only materializes structure templates with `DataVersion < targetDataVersion`. Current-version, non-template, corrupt, and oversized (`>32 MiB` decoded / `>64 MiB` compressed) files are recorded as `P` (passthrough) with zero disk writes.
-- **Heap-safe & process-safe**: Adaptive `1–4` worker concurrency (automatically throttled to `1` worker when `-Xmx <= 6.8G` or heap headroom `< 2.5G`), `prepare.lock` cross-process lock, orphan file pruning, and automatic cleanup of legacy `1.x` cache directories (`blobs/`, `sources/`, `generations/`, `index.json`).
+- **Heap-safe & process-safe**: Adaptive `1–4` worker concurrency (automatically throttled to `1` worker when `-Xmx <= 6.8G` or heap headroom `< 2.5G`), `prepare.lock` cross-process lock, and orphan file pruning.
 - **Native Config & Health Dashboard**: Built-in zero-dependency screen accessible via Mod Menu (Fabric), Forge, and NeoForge. Displays live/on-disk status, last prepare time (`ms`), accelerated/passthrough counts, `overlay/` disk usage, hot-save toggles, and a one-click **Clear Cache** button.
 - **Server OP Diagnostics**: Native Brigadier `/structuredfucache status` and `/structuredfucache clear` (permission level 2), completely invisible to non-OP players.
 - **Zero External Dependencies**: Pure single JAR (`< 100 KB`), no Fabric API, no Cloth Config, no library mods required.

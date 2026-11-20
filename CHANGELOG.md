@@ -3,10 +3,10 @@
 ## 2.0.0
 
 ### Core v2 Engine
-- Replaced legacy `blobs/`, `sources/`, `generations/<uuid>`, and `index.json` with a single `overlay/data/<ns>/<path>` layer and streaming `manifest.v2` line format.
+- Single `overlay/data/<ns>/<path>` layer and streaming `manifest.v2` line format.
 - Added sub-5ms warm-boot fast-path mounting by validating line 1 of `manifest.v2` against `PackFingerprint` (zero structure file reads or NBT decoding).
 - Only materializes structures with `DataVersion < targetDataVersion`; records current-version, non-template, corrupt, and oversized (`>32 MiB` decoded / `>64 MiB` compressed) NBT as `P` (passthrough) with zero disk writes.
-- Added adaptive `1–4` worker concurrency (single-threaded streaming on `<=6.8G` heaps), `prepare.lock` process locking, orphan file pruning, and automatic legacy `1.x` cache directory cleanup.
+- Added adaptive `1–4` worker concurrency (single-threaded streaming on `<=6.8G` heaps), `prepare.lock` process locking, and orphan file pruning.
 
 ### Cross-Platform 8-Target Matrix
 - Decoupled `PackFingerprint` and runtime metadata from NeoForge via `PlatformBridge` (`FabricLoader` / Forge `ModList` / NeoForge `ModList`) and `McCompat` (`v120` plural `structures/`, `v121` singular `structure/`, `v26` `Identifier` + `WorldVersion` record).
@@ -25,7 +25,7 @@
 
 ## 1.2.0 / 1.1.0
 
-- Earlier multi-loader `1.x` content-addressed cache releases (`blobs/`, `generations/`, `index.json`), now automatically cleaned up on upgrade to `2.0.0`.
+- Earlier multi-loader content-addressed cache releases.
 
 ## 1.0.1
 
