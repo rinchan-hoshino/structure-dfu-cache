@@ -1,7 +1,7 @@
 plugins {
     id 'fabric-loom' version '1.14.10' apply false
-    id 'net.neoforged.moddev' version '2.0.143' apply false
-    id 'net.neoforged.moddev.legacyforge' version '2.0.143' apply false
+    id 'net.neoforged.moddev' version '2.0.148' apply false
+    id 'net.neoforged.moddev.legacyforge' version '2.0.148' apply false
 }
 
 def profiles = new groovy.json.JsonSlurper().parse(file('profiles.json'))

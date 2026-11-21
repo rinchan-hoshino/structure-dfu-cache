@@ -7,7 +7,7 @@
 | Shared Core | `common/src/main/java` | `StructureCacheBootstrap`, `StructureCacheBuilder`, `CacheManifest`, `PackFingerprint`, `CacheStats`, `StructureKey`, `StructureDfuCacheConfig`, `SimpleToml`, `StructureDfuCacheCommand`, `StructureTemplateManagerMixin`, `CommandsMixin` |
 | MC `1.20.1` Adapter | `common/src/v120/` | `McCompat` (`structures/` plural dir, `ResourceLocation`, `NbtAccounter(long)`), `StructureOverlayResourceManager`, `StructureDfuCacheConfigScreen` |
 | MC `1.21.1` Adapter | `common/src/v121/` | `McCompat` (`structure/` singular dir, `ResourceLocation`, `NbtAccounter.create`), `StructureOverlayResourceManager`, `StructureDfuCacheConfigScreen` |
-| MC `26.1.2` / `26.2` Adapter | `common/src/v26/` | `McCompat` (`Identifier`, `WorldVersion.dataVersion().version()`, `Commands.LEVEL_GAMEMASTERS`), `StructureOverlayResourceManager`, `StructureDfuCacheConfigScreen` |
+| MC `26.1.2` / `26.2` / `26.3` Adapter | `common/src/v26/` | `McCompat` (`Identifier`, `WorldVersion.dataVersion().version()`, `Commands.LEVEL_GAMEMASTERS`), `StructureOverlayResourceManager`, `StructureDfuCacheConfigScreen` |
 | Fabric Loader | `fabric/` | `StructureDfuCacheFabric` (`FabricPlatformBridge`), `StructureDfuCacheModMenu`, compile-only `modmenuStub` |
 | Forge Loader (`1.20.1`) | `forge/` | `StructureDfuCacheForge` (`ForgePlatformBridge`, `ConfigScreenHandler.ConfigScreenFactory`) |
 | NeoForge Loader (`1.21.1` / `26.x`) | `neoforge/` | `StructureDfuCacheNeoForge` (`NeoForgePlatformBridge`), `StructureDfuCacheNeoForgeClient` (`IConfigScreenFactory`) |
@@ -55,4 +55,4 @@ All three hard verification gates are wired directly into local `./gradlew check
   - Command: `./gradlew :neoforge:test --tests "*ArchitectureContractTest*" -Pminecraft_version=1.21.1 -Ploader=neoforge --no-configuration-cache`
 - **Full Local Gate Entry Points**:
   - Single-target full verification: `./gradlew :neoforge:check -Pminecraft_version=1.21.1 -Ploader=neoforge --no-configuration-cache`
-  - Full 8-target release matrix & audit: `python3 scripts/build-matrix.py`
+  - Full 10-target release matrix & audit: `python3 scripts/build-matrix.py`

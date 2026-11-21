@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.3
+
+- **1.20.1 Forge `pack.mcmeta` Fix**: Added `pack.mcmeta` (`pack_format: 15`) exclusively to the `1.20.1` Forge JAR to eliminate the `ResourcePackInfo` startup warning, with strict per-target JAR assertions in `scripts/build-matrix.py`.
+- **Minecraft 26.3 Support**: Added `26.3` (`Fabric` & `NeoForge`, Java 25) to `profiles.json`, expanding the release matrix to 10 targets.
+
 ## 2.0.2
 
 - **Corrupt Manifest Self-Healing**: Hardened `CacheManifest` against non-UTF-8 or binary-corrupted `manifest.v2` files by safely catching `MalformedInputException` / `IOException` and automatically rebuilding the cache instead of crashing startup.

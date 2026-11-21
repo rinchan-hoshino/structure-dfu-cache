@@ -82,8 +82,8 @@ class ArchitectureContractTest {
         }
         if (requireAll) {
             assertTrue(
-                releaseJars.size() == 8,
-                "Expected all 8 release JARs in " + releasesDir + ", found " + releaseJars.size() + ": " + releaseJars
+                releaseJars.size() == 10,
+                "Expected all 10 release JARs in " + releasesDir + ", found " + releaseJars.size() + ": " + releaseJars
             );
         }
         assertFalse(unique.isEmpty(), "No packaged JARs found to audit");

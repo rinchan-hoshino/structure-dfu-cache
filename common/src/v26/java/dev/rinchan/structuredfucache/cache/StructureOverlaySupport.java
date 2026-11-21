@@ -9,64 +9,48 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.function.Predicate;
-import java.util.stream.Stream;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.PackLocationInfo;
 import net.minecraft.server.packs.PackResources;
 import net.minecraft.server.packs.PathPackResources;
-import net.minecraft.server.packs.repository.PackSource;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
 
 /**
- * Lightweight ResourceManager wrapper for Minecraft 26.x serving pre-upgraded structure NBT
- * files directly from overlay/data/<namespace>/structure/<path>.
+ * Shared overlay resolution and merging logic for Minecraft 26.x {@link ResourceManager} wrappers.
  */
-public final class StructureOverlayResourceManager implements ResourceManager {
+final class StructureOverlaySupport {
     private static final String STRUCTURE_PREFIX = "structure/";
     private static final PackLocationInfo OVERLAY_INFO = new PackLocationInfo(
         StructureDfuCache.MOD_ID + "_overlay",
         Component.translatable("pack.structure_dfu_cache.overlay"),
-        PackSource.BUILT_IN,
+        net.minecraft.server.packs.repository.PackSource.BUILT_IN,
         Optional.empty()
     );
 
-    private final ResourceManager delegate;
     private final Path overlayDataDir;
     private final PackResources overlayPack;
 
-    public StructureOverlayResourceManager(ResourceManager original, Path overlayDataDir) {
-        if (original == null || overlayDataDir == null) {
-            throw new IllegalArgumentException("original and overlayDataDir must not be null");
-        }
-        this.delegate = original instanceof StructureOverlayResourceManager existing
-            ? existing.delegate()
-            : original;
+    StructureOverlaySupport(Path overlayDataDir) {
         this.overlayDataDir = overlayDataDir.toAbsolutePath().normalize();
         Path packRoot = this.overlayDataDir.getParent() != null ? this.overlayDataDir.getParent() : this.overlayDataDir;
         this.overlayPack = new PathPackResources(OVERLAY_INFO, packRoot);
     }
 
-    public ResourceManager delegate() {
-        return delegate;
+    Optional<Resource> resolveOverlay(Identifier location) {
+        String path = location.getPath();
+        if (!path.startsWith(STRUCTURE_PREFIX) || !path.endsWith(".nbt")) {
+            return Optional.empty();
+        }
+        Path candidate = overlayDataDir.resolve(location.getNamespace()).resolve(path).normalize();
+        if (!candidate.startsWith(overlayDataDir) || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) {
+            return Optional.empty();
+        }
+        return Optional.of(new Resource(overlayPack, () -> Files.newInputStream(candidate)));
     }
 
-    @Override
-    public Set<String> getNamespaces() {
-        return delegate.getNamespaces();
-    }
-
-    @Override
-    public Optional<Resource> getResource(Identifier location) {
-        Optional<Resource> overlaid = resolveOverlay(location);
-        return overlaid.isPresent() ? overlaid : delegate.getResource(location);
-    }
-
-    @Override
-    public List<Resource> getResourceStack(Identifier location) {
+    List<Resource> mergeResourceStack(ResourceManager delegate, Identifier location) {
         Optional<Resource> overlaid = resolveOverlay(location);
         if (overlaid.isEmpty()) {
             return delegate.getResourceStack(location);
@@ -81,9 +65,7 @@ public final class StructureOverlayResourceManager implements ResourceManager {
         return combined;
     }
 
-    @Override
-    public Map<Identifier, Resource> listResources(String path, Predicate<Identifier> filter) {
-        Map<Identifier, Resource> base = delegate.listResources(path, filter);
+    Map<Identifier, Resource> mergeListedResources(String path, Map<Identifier, Resource> base) {
         if (base.isEmpty() || (!path.isEmpty() && !"structure".equals(path) && !path.startsWith(STRUCTURE_PREFIX))) {
             return base;
         }
@@ -98,27 +80,5 @@ public final class StructureOverlayResourceManager implements ResourceManager {
             }
         }
         return merged != null ? merged : base;
-    }
-
-    @Override
-    public Map<Identifier, List<Resource>> listResourceStacks(String path, Predicate<Identifier> filter) {
-        return delegate.listResourceStacks(path, filter);
-    }
-
-    @Override
-    public Stream<PackResources> listPacks() {
-        return delegate.listPacks();
-    }
-
-    private Optional<Resource> resolveOverlay(Identifier location) {
-        String path = location.getPath();
-        if (!path.startsWith(STRUCTURE_PREFIX) || !path.endsWith(".nbt")) {
-            return Optional.empty();
-        }
-        Path candidate = overlayDataDir.resolve(location.getNamespace()).resolve(path).normalize();
-        if (!candidate.startsWith(overlayDataDir) || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) {
-            return Optional.empty();
-        }
-        return Optional.of(new Resource(overlayPack, () -> Files.newInputStream(candidate)));
     }
 }

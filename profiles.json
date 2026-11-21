@@ -30,5 +30,13 @@
     "neo": "26.2.0.69",
     "range": "[26.2,26.3)",
     "fabric_range": "~26.2"
+  },
+  "26.3": {
+    "java": 25,
+    "api": "v26",
+    "loaders": ["fabric", "neoforge"],
+    "neo": "26.3.0.115",
+    "range": "[26.3,26.4)",
+    "fabric_range": "~26.3"
   }
 }

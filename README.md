@@ -14,7 +14,7 @@ Eliminates repeated Minecraft structure DataFixerUpper (DFU) conversions during 
 - **Zero External Dependencies**: Pure single JAR (`< 100 KB`), no Fabric API, no Cloth Config, no library mods required.
 - **4-Language Localization**: English (`en_us`), Simplified Chinese (`zh_cn`), Traditional Chinese (`zh_tw`), Japanese (`ja_jp`).
 
-## Supported Matrix (8 Targets)
+## Supported Matrix (10 Targets)
 
 | Minecraft | Fabric | Forge | NeoForge | Java |
 | --- | --- | --- | --- | --- |
@@ -22,6 +22,7 @@ Eliminates repeated Minecraft structure DataFixerUpper (DFU) conversions during 
 | `1.21.1` | Yes | — | Yes (`21.1+`) | Java 21 |
 | `26.1.2` | Yes | — | Yes (`26.1.2+`) | Java 25 |
 | `26.2` | Yes | — | Yes (`26.2+`) | Java 25 |
+| `26.3` | Yes | — | Yes (`26.3+`) | Java 25 |
 
 ## Configuration
 
