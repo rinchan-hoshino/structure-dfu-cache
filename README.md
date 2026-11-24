@@ -1,79 +1,59 @@
 # Structure DFU Cache
 
-![Structure DFU Cache Icon](docs/icon.png)
+<p align="center">
+  <img src="docs/icon.png" alt="Structure DFU Cache" width="128" height="128" />
+</p>
 
-Eliminates repeated Minecraft structure DataFixerUpper (DFU) conversions during world loading and `/reload` by pre-upgrading outdated structure NBT templates once into a single-layer overlay cache — with sub-5ms zero-read warm startups, a live native health dashboard, and zero external dependencies.
+**Speeds up world loading and `/reload` in modpacks by caching upgraded structure templates on disk.**
 
-## Highlights
+Many structure and dungeon mods ship `.nbt` structure files saved on older Minecraft versions, forcing vanilla DataFixerUpper (DFU) to re-upgrade the exact same templates every time you open a world or run `/reload`. **Structure DFU Cache** upgrades outdated structure templates once into a local `cache/structure_dfu_cache/` folder and serves the upgraded files directly on future launches.
 
-- **Sub-5ms warm-boot fast path**: Validates line 1 of `cache/structure_dfu_cache/manifest.v2` against `PackFingerprint` (active pack stack + mod files + datapack metadata) without reading or decoding a single NBT file.
-- **Single-layer overlay (`overlay/data/<ns>/<path>`)**: Only materializes structure templates with `DataVersion < targetDataVersion`. Current-version, non-template, corrupt, and oversized (`>32 MiB` decoded / `>64 MiB` compressed) files are recorded as `P` (passthrough) with zero disk writes.
-- **Heap-safe & process-safe**: Adaptive `1–4` worker concurrency (automatically throttled to `1` worker when `-Xmx <= 6.8G` or heap headroom `< 2.5G`), `prepare.lock` cross-process lock, and orphan file pruning.
-- **Native Config & Health Dashboard**: Built-in zero-dependency screen accessible via Mod Menu (Fabric), Forge, and NeoForge. Displays live/on-disk status, last prepare time (`ms`), accelerated/passthrough counts, `overlay/` disk usage, hot-save toggles, and a one-click **Clear Cache** button.
-- **Server OP Diagnostics**: Native Brigadier `/structuredfucache status` and `/structuredfucache clear` (permission level 2), completely invisible to non-OP players.
-- **Zero External Dependencies**: Pure single JAR (`< 100 KB`), no Fabric API, no Cloth Config, no library mods required.
-- **4-Language Localization**: English (`en_us`), Simplified Chinese (`zh_cn`), Traditional Chinese (`zh_tw`), Japanese (`ja_jp`).
+![Structure DFU Cache Dashboard](docs/screenshots/01-cache-dashboard.png)
 
-## Supported Matrix (10 Targets)
+## Why Use It
 
-| Minecraft | Fabric | Forge | NeoForge | Java |
-| --- | --- | --- | --- | --- |
-| `1.20.1` | Yes | Yes (`47.4+`) | — | Java 17 |
-| `1.21.1` | Yes | — | Yes (`21.1+`) | Java 21 |
-| `26.1.2` | Yes | — | Yes (`26.1.2+`) | Java 25 |
-| `26.2` | Yes | — | Yes (`26.2+`) | Java 25 |
-| `26.3` | Yes | — | Yes (`26.3+`) | Java 25 |
+- **Upgrade once, skip repeat work**: Automatically detects modpack or datapack changes; when nothing changed, warm world loads validate the cache in a few milliseconds instead of re-converting thousands of structure files.
+- **Only touches outdated templates**: Structure files that already match the current Minecraft version (or exceed safe size limits) are left untouched without duplicating disk space.
+- **RAM-friendly on heavy packs**: Automatically throttles background worker threads when your client or server runs with tight heap headroom (`-Xmx <= 6.8G`) so initial cache builds don't spike memory.
+- **Built-in status screen & OP commands**: Check prepare time, upgraded structure counts, and cache disk usage — or trigger a clean rebuild — from the Mod Menu / Forge / NeoForge config screen or via `/structuredfucache status` and `/structuredfucache clear` (OPs only).
+- **Safe to add or remove anytime**: Works alongside **Lithium**, **ModernFix**, **FerriteCore**, **C2ME**, and **LazyDFU**, and never modifies your world saves.
+
+![Operator Status Command](docs/screenshots/02-status-command.png)
 
 ## Configuration
 
-Generated automatically at `config/structure_dfu_cache.toml` (also editable in-game via the native Config Screen):
+Edit in-game or in `config/structure_dfu_cache.toml`:
 
 ```toml
-# Master switch. When false, bypasses the overlay and uses vanilla resources directly.
+# Master switch. Set false to bypass the cache and load raw mod/datapack structures directly.
 enabled = true
 
-# Maximum worker threads during cold/incremental cache builds.
-# 0 = auto-adaptive (1..4 based on JVM heap headroom); 1..8 = explicit cap.
+# Max background threads during initial/incremental cache builds (0 = automatic 1..4 based on free heap).
 maxWorkers = 0
 
-# When true, logs extra build diagnostics at INFO level.
+# Log detailed cache build diagnostics at INFO level.
 verboseLogging = false
 ```
 
-## OP Commands
+## Supported Versions
 
-Requires permission level 2 (gamemaster / operator):
+Standalone JAR (`< 100 KB`) with no required library mods.
 
-- `/structuredfucache status` — Shows current mount mode, last prepare duration, accelerated/passthrough counts, `overlay/` disk size, and worker setting.
-- `/structuredfucache clear` — Clears `cache/structure_dfu_cache/` so the overlay rebuilds on the next world load or `/reload`.
+| Minecraft | Fabric | Forge | NeoForge | Java |
+| --- | --- | --- | --- | --- |
+| `1.20.1` | ✅ | ✅ (`47.4+`) | — | 17 |
+| `1.21.1` | ✅ | — | ✅ (`21.1+`) | 21 |
+| `26.1.2` | ✅ | — | ✅ (`26.1.2+`) | 25 |
+| `26.2` | ✅ | — | ✅ (`26.2+`) | 25 |
+| `26.3` | ✅ | — | ✅ (`26.3+`) | 25 |
 
-## Safety Limits
-
-| Limit | Value |
-| --- | --- |
-| Max compressed structure size | `64 MiB` |
-| Max decoded NBT size | `32 MiB` (`NbtAccounter` cap) |
-| Default worker budget | `1` when `-Xmx <= 6.8G` or headroom `< 2.5G`, else `2–4` |
-
-## Compatibility
-
-- Works alongside **Lithium**, **ModernFix**, **C2ME**, **FerriteCore**, and **LazyDFU** without overlap.
-- Removing the JAR leaves vanilla worlds untouched; `cache/structure_dfu_cache/` can be deleted safely at any time while the game is stopped.
-
-## Building & Verification
-
-Enable the local `pre-push` verification hook once after cloning:
+## Building
 
 ```bash
 ./scripts/setup-hooks.sh
-```
-
-Run the full multi-target build, JUnit + property fuzzing (`>= 1,200` iterations), bytecode architecture contracts, and packaged-JAR NeoForge `1.21.1` GameTest E2E suite (auto-falls back to Docker/Podman when host JDK 17/21/25 are unavailable, or force containerized `xvfb-run` execution with `--container`):
-
-```bash
 ./scripts/verify.sh [--container]
 ```
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE).
+`GPL-3.0-or-later` — see [LICENSE](LICENSE).
