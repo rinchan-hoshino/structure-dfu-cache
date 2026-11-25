@@ -34,26 +34,3 @@ maxWorkers = 0
 # Log detailed cache build diagnostics at INFO level.
 verboseLogging = false
 ```
-
-## Supported Versions
-
-Standalone JAR (`< 100 KB`) with no required library mods.
-
-| Minecraft | Fabric | Forge | NeoForge | Java |
-| --- | --- | --- | --- | --- |
-| `1.20.1` | ✅ | ✅ (`47.4+`) | — | 17 |
-| `1.21.1` | ✅ | — | ✅ (`21.1+`) | 21 |
-| `26.1.2` | ✅ | — | ✅ (`26.1.2+`) | 25 |
-| `26.2` | ✅ | — | ✅ (`26.2+`) | 25 |
-| `26.3` | ✅ | — | ✅ (`26.3+`) | 25 |
-
-## Building
-
-```bash
-./scripts/setup-hooks.sh
-./scripts/verify.sh [--container]
-```
-
-## License
-
-`GPL-3.0-or-later` — see [LICENSE](LICENSE).
