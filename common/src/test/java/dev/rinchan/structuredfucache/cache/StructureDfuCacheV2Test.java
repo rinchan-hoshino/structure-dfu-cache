@@ -249,15 +249,19 @@ class StructureDfuCacheV2Test {
     @Test
     void configRoundTripsAndDisabledMasterSwitchBypassesOverlay() throws Exception {
         Path configFile = tempDir.resolve("config/structure_dfu_cache.toml");
-        assertFalse(StructureDfuCacheConfig.defaults().notifyInChat(), "Chat notifications must default to false");
-        StructureDfuCacheConfig written = new StructureDfuCacheConfig(false, 5, true, true);
+        assertTrue(StructureDfuCacheConfig.defaults().notifyInChat(), "Chat notifications must default to true");
+        StructureDfuCacheConfig written = new StructureDfuCacheConfig(false, 5, true, false);
         StructureDfuCacheConfig.writeTo(configFile, written);
 
         StructureDfuCacheConfig readBack = StructureDfuCacheConfig.readFrom(configFile);
         assertEquals(written, readBack);
         assertEquals(8, new StructureDfuCacheConfig(true, 42, false).maxWorkers());
         assertEquals(0, new StructureDfuCacheConfig(true, -3, false).maxWorkers());
-        assertFalse(new StructureDfuCacheConfig(true, 0, false).notifyInChat());
+        assertTrue(new StructureDfuCacheConfig(true, 0, false).notifyInChat());
+
+        Path legacyFile = tempDir.resolve("config/legacy_no_notify.toml");
+        Files.writeString(legacyFile, "enabled = true\nmaxWorkers = 0\nverboseLogging = false\n", StandardCharsets.UTF_8);
+        assertTrue(StructureDfuCacheConfig.readFrom(legacyFile).notifyInChat(), "Missing notifyInChat must fall back to true");
 
         Path packDir = tempDir.resolve("pack");
         Path cacheRoot = tempDir.resolve("cache");
@@ -275,22 +279,22 @@ class StructureDfuCacheV2Test {
     void chatNoticeRespectsConfigAuthorizationAndDeduplicatesPerPrepare() {
         StructureCacheBootstrap.resetNoticeStateForTests();
         java.util.UUID playerId = java.util.UUID.randomUUID();
-        StructureDfuCacheConfig quietCfg = StructureDfuCacheConfig.defaults();
-        StructureDfuCacheConfig notifyCfg = new StructureDfuCacheConfig(true, 0, false, true);
+        StructureDfuCacheConfig defaultCfg = StructureDfuCacheConfig.defaults();
+        StructureDfuCacheConfig quietCfg = new StructureDfuCacheConfig(true, 0, false, false);
         StructureDfuCacheConfig disabledCfg = new StructureDfuCacheConfig(false, 0, false, true);
 
         assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(quietCfg, true, true, playerId));
         assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(disabledCfg, true, true, playerId));
-        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(notifyCfg, false, true, playerId));
-        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(notifyCfg, true, false, playerId));
-        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(notifyCfg, true, true, null));
+        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(defaultCfg, false, true, playerId));
+        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(defaultCfg, true, false, playerId));
+        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(defaultCfg, true, true, null));
 
-        assertTrue(StructureCacheBootstrap.shouldNotifyPlayer(notifyCfg, true, true, playerId));
-        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(notifyCfg, true, true, playerId),
+        assertTrue(StructureCacheBootstrap.shouldNotifyPlayer(defaultCfg, true, true, playerId));
+        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(defaultCfg, true, true, playerId),
             "Same player must not be notified twice for the same prepare cycle");
 
         StructureCacheBootstrap.resetNoticeStateForTests();
-        assertTrue(StructureCacheBootstrap.shouldNotifyPlayer(notifyCfg, true, true, playerId));
+        assertTrue(StructureCacheBootstrap.shouldNotifyPlayer(defaultCfg, true, true, playerId));
 
         CacheStats.Snapshot snap = new CacheStats.Snapshot(
             CacheStats.Mode.FAST_PATH, 4L, 12, 3, 12, 0, 4096L, 12, "fp-test"

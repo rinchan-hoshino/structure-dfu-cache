@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.5
+
+- **Chat Ready Notice Enabled by Default (`notifyInChat = true`)**: Changed the default value of `notifyInChat` from `false` to `true` across `structure_dfu_cache.toml`, missing-key fallback, and the in-game Config & Health Dashboard screen (`1.20.1`, `1.21.1`, `26.x`). Joining operators and singleplayer hosts now immediately see a single concise cache summary in chat once per prepare cycle; modpack authors who prefer silent chat can set `notifyInChat = false`.
+
 ## 2.0.4
 
 - **Optional Chat Ready Notice (`notifyInChat`)**: Added `notifyInChat = false` (off by default so chat stays completely quiet) across `structure_dfu_cache.toml`, the in-game Config & Health Dashboard screen (`1.20.1`, `1.21.1`, `26.x`), and all 4 languages (`en_us`, `zh_cn`, `zh_tw`, `ja_jp`). When enabled, sends a single concise cache summary in chat once per prepare cycle to joining operators or the singleplayer host.

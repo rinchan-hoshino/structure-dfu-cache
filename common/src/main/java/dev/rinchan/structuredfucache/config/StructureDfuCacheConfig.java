@@ -29,11 +29,11 @@ public record StructureDfuCacheConfig(boolean enabled, int maxWorkers, boolean v
     }
 
     public StructureDfuCacheConfig(boolean enabled, int maxWorkers, boolean verboseLogging) {
-        this(enabled, maxWorkers, verboseLogging, false);
+        this(enabled, maxWorkers, verboseLogging, true);
     }
 
     public static StructureDfuCacheConfig defaults() {
-        return new StructureDfuCacheConfig(true, 0, false, false);
+        return new StructureDfuCacheConfig(true, 0, false, true);
     }
 
     public static StructureDfuCacheConfig get() {
@@ -73,7 +73,7 @@ public record StructureDfuCacheConfig(boolean enabled, int maxWorkers, boolean v
             boolean enabled = readBoolean(parsed, "enabled", true);
             int maxWorkers = readInt(parsed, "maxWorkers", 0);
             boolean verboseLogging = readBoolean(parsed, "verboseLogging", false);
-            boolean notifyInChat = readBoolean(parsed, "notifyInChat", false);
+            boolean notifyInChat = readBoolean(parsed, "notifyInChat", true);
             return new StructureDfuCacheConfig(enabled, maxWorkers, verboseLogging, notifyInChat);
         } catch (IOException | RuntimeException exception) {
             LOGGER.warn("Unable to read {}: {}; using defaults.", file, exception.getMessage());
@@ -111,7 +111,7 @@ public record StructureDfuCacheConfig(boolean enabled, int maxWorkers, boolean v
             + "# When true, logs extra fingerprint and build diagnostics at INFO level.\n"
             + "verboseLogging = " + cfg.verboseLogging() + "\n\n"
             + "# When true, sends a single concise cache status notice in chat to joining ops / singleplayer host.\n"
-            + "# Defaults to false so chat stays completely quiet.\n"
+            + "# Defaults to true; set false for completely silent chat.\n"
             + "notifyInChat = " + cfg.notifyInChat() + "\n";
     }
 
