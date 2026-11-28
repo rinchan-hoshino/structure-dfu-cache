@@ -21,6 +21,7 @@ public final class StructureDfuCacheConfigScreen extends Screen {
     private boolean enabled;
     private int maxWorkers;
     private boolean verboseLogging;
+    private boolean notifyInChat;
     private CacheStats.Snapshot snapshot;
     private Component feedback;
     private int feedbackColor = 0xFF7CE38B;
@@ -34,6 +35,7 @@ public final class StructureDfuCacheConfigScreen extends Screen {
         this.enabled = cfg.enabled();
         this.maxWorkers = cfg.maxWorkers();
         this.verboseLogging = cfg.verboseLogging();
+        this.notifyInChat = cfg.notifyInChat();
         this.snapshot = CacheStats.inspect(StructureDfuCache.cacheRoot());
     }
 
@@ -61,6 +63,12 @@ public final class StructureDfuCacheConfigScreen extends Screen {
             .create(this.panelLeft, y, this.panelWidth, 20,
                 Component.translatable("screen.structure_dfu_cache.verbose_logging"),
                 (btn, value) -> this.verboseLogging = value));
+        y += 24;
+
+        this.addRenderableWidget(CycleButton.onOffBuilder(this.notifyInChat)
+            .create(this.panelLeft, y, this.panelWidth, 20,
+                Component.translatable("screen.structure_dfu_cache.notify_in_chat"),
+                (btn, value) -> this.notifyInChat = value));
         y += 28;
 
         this.addRenderableWidget(Button.builder(
@@ -121,12 +129,13 @@ public final class StructureDfuCacheConfigScreen extends Screen {
         this.enabled = defaults.enabled();
         this.maxWorkers = defaults.maxWorkers();
         this.verboseLogging = defaults.verboseLogging();
+        this.notifyInChat = defaults.notifyInChat();
         this.rebuildWidgets();
     }
 
     private void saveAndClose() {
         StructureDfuCacheConfig.updateAndSave(
-            new StructureDfuCacheConfig(this.enabled, this.maxWorkers, this.verboseLogging)
+            new StructureDfuCacheConfig(this.enabled, this.maxWorkers, this.verboseLogging, this.notifyInChat)
         );
         onClose();
     }
@@ -181,7 +190,7 @@ public final class StructureDfuCacheConfigScreen extends Screen {
         );
 
         if (this.feedback != null) {
-            graphics.centeredText(this.font, this.feedback, this.width / 2, 196, this.feedbackColor);
+            graphics.centeredText(this.font, this.feedback, this.width / 2, 220, this.feedbackColor);
         }
     }
 

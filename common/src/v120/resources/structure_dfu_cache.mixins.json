@@ -6,6 +6,7 @@
   "refmap": "structure_dfu_cache.refmap.json",
   "mixins": [
     "CommandsMixin",
+    "PlayerListMixin",
     "StructureTemplateManagerMixin"
   ],
   "injectors": {

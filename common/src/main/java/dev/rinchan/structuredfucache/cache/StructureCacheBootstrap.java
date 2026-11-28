@@ -13,8 +13,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Comparator;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.packs.resources.ResourceManager;
 import org.slf4j.Logger;
 
@@ -25,6 +31,8 @@ import org.slf4j.Logger;
  */
 public final class StructureCacheBootstrap {
     private static final Logger LOGGER = LogUtils.getLogger();
+    private static final Set<UUID> NOTIFIED_PLAYERS = ConcurrentHashMap.newKeySet();
+    private static volatile boolean cacheReadyForNotice = false;
 
     private StructureCacheBootstrap() {
     }
@@ -70,6 +78,8 @@ public final class StructureCacheBootstrap {
         ResourceManager base = McCompat.unwrapOverlay(original);
         if (config != null && !config.enabled()) {
             CacheStats.recordDisabled();
+            cacheReadyForNotice = false;
+            NOTIFIED_PLAYERS.clear();
             return base;
         }
         long startedNanos = System.nanoTime();
@@ -92,6 +102,7 @@ public final class StructureCacheBootstrap {
                 if (existing.isPresent() && existing.get().equals(expectedHeader) && Files.isDirectory(overlayDataDir)) {
                     long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
                     CacheStats.recordFastPath(elapsedMs, expectedHeader.packFingerprint());
+                    markReadyForNotice();
                     LOGGER.info(
                         "Structure DFU cache mounted in {} ms (fast-path, fingerprint={})",
                         elapsedMs,
@@ -104,6 +115,7 @@ public final class StructureCacheBootstrap {
                 StructureCacheBuilder.BuildSummary summary =
                     new StructureCacheBuilder(dataFixer, cacheRoot, workers).build(base, expectedHeader);
                 CacheStats.recordBuild(summary, expectedHeader.packFingerprint());
+                markReadyForNotice();
                 if (config != null && config.verboseLogging()) {
                     LOGGER.info(
                         "Structure DFU cache built in {} ms (workers={}, total={}, converted={}, passthrough={}, cacheHits={}, skippedBad={}, fingerprint={})",
@@ -161,5 +173,54 @@ public final class StructureCacheBootstrap {
 
     private static String shortFingerprint(String fingerprint) {
         return fingerprint.length() <= 12 ? fingerprint : fingerprint.substring(0, 12);
+    }
+
+    private static void markReadyForNotice() {
+        NOTIFIED_PLAYERS.clear();
+        cacheReadyForNotice = true;
+    }
+
+    public static void onPlayerJoin(ServerPlayer player) {
+        if (player == null) {
+            return;
+        }
+        StructureDfuCacheConfig config = StructureDfuCacheConfig.get();
+        if (!shouldNotifyPlayer(config, cacheReadyForNotice, McCompat.isOpOrSingleplayerHost(player), player.getUUID())) {
+            return;
+        }
+        CacheStats.Snapshot snap = CacheStats.inspect(StructureDfuCache.cacheRoot());
+        McCompat.sendSystemMessage(player, buildReadyNotice(snap));
+    }
+
+    static boolean shouldNotifyPlayer(
+        StructureDfuCacheConfig config,
+        boolean ready,
+        boolean authorized,
+        UUID playerId
+    ) {
+        if (config == null || !config.enabled() || !config.notifyInChat() || !ready || !authorized || playerId == null) {
+            return false;
+        }
+        return NOTIFIED_PLAYERS.add(playerId);
+    }
+
+    static void resetNoticeStateForTests() {
+        NOTIFIED_PLAYERS.clear();
+        cacheReadyForNotice = false;
+    }
+
+    static Component buildReadyNotice(CacheStats.Snapshot snap) {
+        Component modeText = Component.translatable(
+            "status.structure_dfu_cache.mode." + snap.mode().name().toLowerCase(Locale.ROOT)
+        );
+        Component timeText = snap.lastPrepareMs() >= 0L
+            ? Component.translatable("status.structure_dfu_cache.ms", snap.lastPrepareMs())
+            : Component.translatable("status.structure_dfu_cache.not_run");
+        return Component.translatable(
+            "message.structure_dfu_cache.ready_notice",
+            modeText,
+            timeText,
+            snap.convertedCount()
+        );
     }
 }

@@ -62,7 +62,7 @@ class StructureDfuCacheConfigScreenTest {
             assertDoesNotThrow(() -> screen.init());
 
             List<? extends GuiEventListener> children = screen.children();
-            assertEquals(7, children.size(), "Expected 3 CycleButtons + 4 action Buttons (Clear/Reset/Cancel/Save)");
+            assertEquals(8, children.size(), "Expected 4 CycleButtons + 4 action Buttons (Clear/Reset/Cancel/Save)");
 
             // Verify live snapshot read on construction reflects disk state.
             var snapField = StructureDfuCacheConfigScreen.class.getDeclaredField("snapshot");

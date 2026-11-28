@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.4
+
+- **Optional Chat Ready Notice (`notifyInChat`)**: Added `notifyInChat = false` (off by default so chat stays completely quiet) across `structure_dfu_cache.toml`, the in-game Config & Health Dashboard screen (`1.20.1`, `1.21.1`, `26.x`), and all 4 languages (`en_us`, `zh_cn`, `zh_tw`, `ja_jp`). When enabled, sends a single concise cache summary in chat once per prepare cycle to joining operators or the singleplayer host.
+
 ## 2.0.3
 
 - **1.20.1 Forge `pack.mcmeta` Fix**: Added `pack.mcmeta` (`pack_format: 15`) exclusively to the `1.20.1` Forge JAR to eliminate the `ResourcePackInfo` startup warning, with strict per-target JAR assertions in `scripts/build-matrix.py`.

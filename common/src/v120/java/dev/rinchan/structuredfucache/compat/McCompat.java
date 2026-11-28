@@ -14,7 +14,10 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
 
@@ -65,5 +68,22 @@ public final class McCompat {
 
     public static boolean hasPermissionLevel2(CommandSourceStack source) {
         return source.hasPermission(2);
+    }
+
+    public static boolean isOpOrSingleplayerHost(ServerPlayer player) {
+        if (player == null) {
+            return false;
+        }
+        if (player.hasPermissions(2)) {
+            return true;
+        }
+        MinecraftServer server = player.getServer();
+        return server != null && server.isSingleplayerOwner(player.getGameProfile());
+    }
+
+    public static void sendSystemMessage(ServerPlayer player, Component message) {
+        if (player != null && message != null) {
+            player.sendSystemMessage(message);
+        }
     }
 }

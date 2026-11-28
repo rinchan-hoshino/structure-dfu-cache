@@ -8,6 +8,7 @@
   "screen.structure_dfu_cache.max_workers": "Build Workers",
   "screen.structure_dfu_cache.workers_auto": "Auto (1–4)",
   "screen.structure_dfu_cache.verbose_logging": "Verbose Logging",
+  "screen.structure_dfu_cache.notify_in_chat": "Chat Ready Notice",
   "screen.structure_dfu_cache.clear_cache": "Clear Cache (Rebuild on Next Load)",
   "screen.structure_dfu_cache.cleared": "Cleared %s files (%s). Cache will rebuild on next load.",
   "screen.structure_dfu_cache.reset": "Reset",
@@ -23,5 +24,6 @@
   "command.structure_dfu_cache.status": "[Structure DFU Cache] %s (%s) | Accelerated: %s, Passthrough: %s | Disk: %s (%s files) | Workers: %s",
   "command.structure_dfu_cache.cleared": "[Structure DFU Cache] Cleared %s files (%s). Cache will rebuild on next world load or /reload.",
   "command.structure_dfu_cache.clear_locked": "[Structure DFU Cache] Cache is locked by another process; try again shortly.",
-  "command.structure_dfu_cache.clear_failed": "[Structure DFU Cache] Failed to clear cache directory."
+  "command.structure_dfu_cache.clear_failed": "[Structure DFU Cache] Failed to clear cache directory.",
+  "message.structure_dfu_cache.ready_notice": "[Structure DFU Cache] %s (%s) — %s upgraded structure templates cached."
 }

@@ -249,13 +249,15 @@ class StructureDfuCacheV2Test {
     @Test
     void configRoundTripsAndDisabledMasterSwitchBypassesOverlay() throws Exception {
         Path configFile = tempDir.resolve("config/structure_dfu_cache.toml");
-        StructureDfuCacheConfig written = new StructureDfuCacheConfig(false, 5, true);
+        assertFalse(StructureDfuCacheConfig.defaults().notifyInChat(), "Chat notifications must default to false");
+        StructureDfuCacheConfig written = new StructureDfuCacheConfig(false, 5, true, true);
         StructureDfuCacheConfig.writeTo(configFile, written);
 
         StructureDfuCacheConfig readBack = StructureDfuCacheConfig.readFrom(configFile);
         assertEquals(written, readBack);
         assertEquals(8, new StructureDfuCacheConfig(true, 42, false).maxWorkers());
         assertEquals(0, new StructureDfuCacheConfig(true, -3, false).maxWorkers());
+        assertFalse(new StructureDfuCacheConfig(true, 0, false).notifyInChat());
 
         Path packDir = tempDir.resolve("pack");
         Path cacheRoot = tempDir.resolve("cache");
@@ -267,6 +269,34 @@ class StructureDfuCacheV2Test {
             assertSame(raw, result, "Disabled config must return vanilla ResourceManager directly");
             assertFalse(Files.exists(cacheRoot.resolve(CacheManifest.FILE_NAME)));
         }
+    }
+
+    @Test
+    void chatNoticeRespectsConfigAuthorizationAndDeduplicatesPerPrepare() {
+        StructureCacheBootstrap.resetNoticeStateForTests();
+        java.util.UUID playerId = java.util.UUID.randomUUID();
+        StructureDfuCacheConfig quietCfg = StructureDfuCacheConfig.defaults();
+        StructureDfuCacheConfig notifyCfg = new StructureDfuCacheConfig(true, 0, false, true);
+        StructureDfuCacheConfig disabledCfg = new StructureDfuCacheConfig(false, 0, false, true);
+
+        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(quietCfg, true, true, playerId));
+        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(disabledCfg, true, true, playerId));
+        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(notifyCfg, false, true, playerId));
+        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(notifyCfg, true, false, playerId));
+        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(notifyCfg, true, true, null));
+
+        assertTrue(StructureCacheBootstrap.shouldNotifyPlayer(notifyCfg, true, true, playerId));
+        assertFalse(StructureCacheBootstrap.shouldNotifyPlayer(notifyCfg, true, true, playerId),
+            "Same player must not be notified twice for the same prepare cycle");
+
+        StructureCacheBootstrap.resetNoticeStateForTests();
+        assertTrue(StructureCacheBootstrap.shouldNotifyPlayer(notifyCfg, true, true, playerId));
+
+        CacheStats.Snapshot snap = new CacheStats.Snapshot(
+            CacheStats.Mode.FAST_PATH, 4L, 12, 3, 12, 0, 4096L, 12, "fp-test"
+        );
+        Component notice = StructureCacheBootstrap.buildReadyNotice(snap);
+        assertTrue(notice.toString().contains("message.structure_dfu_cache.ready_notice"));
     }
 
     @Test

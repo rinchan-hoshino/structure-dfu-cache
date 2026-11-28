@@ -8,6 +8,7 @@
   "screen.structure_dfu_cache.max_workers": "ビルド並列スレッド",
   "screen.structure_dfu_cache.workers_auto": "自動（1–4）",
   "screen.structure_dfu_cache.verbose_logging": "詳細ログ出力",
+  "screen.structure_dfu_cache.notify_in_chat": "チャット完了通知",
   "screen.structure_dfu_cache.clear_cache": "キャッシュを削除（次回読込時に再構築）",
   "screen.structure_dfu_cache.cleared": "%s ファイル（%s）を削除しました。次回読込時に再構築されます。",
   "screen.structure_dfu_cache.reset": "初期化",
@@ -23,5 +24,6 @@
   "command.structure_dfu_cache.status": "[Structure DFU Cache] %s（%s）| 高速化: %s / 透過: %s | ディスク: %s（%s ファイル）| スレッド: %s",
   "command.structure_dfu_cache.cleared": "[Structure DFU Cache] %s ファイル（%s）を削除しました。次回ワールド読込または /reload で再構築されます。",
   "command.structure_dfu_cache.clear_locked": "[Structure DFU Cache] 別プロセスによりロックされています。しばらくしてから再試行してください。",
-  "command.structure_dfu_cache.clear_failed": "[Structure DFU Cache] キャッシュディレクトリの削除に失敗しました。"
+  "command.structure_dfu_cache.clear_failed": "[Structure DFU Cache] キャッシュディレクトリの削除に失敗しました。",
+  "message.structure_dfu_cache.ready_notice": "[Structure DFU Cache] %s（%s）— 変換済み構造物テンプレート %s 件をキャッシュ済み。"
 }

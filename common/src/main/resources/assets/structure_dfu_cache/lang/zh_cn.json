@@ -8,6 +8,7 @@
   "screen.structure_dfu_cache.max_workers": "构建并发线程",
   "screen.structure_dfu_cache.workers_auto": "自动（1–4）",
   "screen.structure_dfu_cache.verbose_logging": "详细诊断日志",
+  "screen.structure_dfu_cache.notify_in_chat": "进服聊天栏提示",
   "screen.structure_dfu_cache.clear_cache": "清空缓存（下次加载重建）",
   "screen.structure_dfu_cache.cleared": "已清理 %s 个文件（释放 %s），下次加载将自动重建。",
   "screen.structure_dfu_cache.reset": "重置默认",
@@ -23,5 +24,6 @@
   "command.structure_dfu_cache.status": "[Structure DFU Cache] %s（%s）| 已加速：%s，透传：%s | 磁盘：%s（%s 个文件）| 线程：%s",
   "command.structure_dfu_cache.cleared": "[Structure DFU Cache] 已清理 %s 个文件（释放 %s），下次进档或 /reload 时重建。",
   "command.structure_dfu_cache.clear_locked": "[Structure DFU Cache] 缓存正被其他进程锁定，请稍后再试。",
-  "command.structure_dfu_cache.clear_failed": "[Structure DFU Cache] 清空缓存目录失败。"
+  "command.structure_dfu_cache.clear_failed": "[Structure DFU Cache] 清空缓存目录失败。",
+  "message.structure_dfu_cache.ready_notice": "[Structure DFU Cache] %s（%s）— 已缓存 %s 个升级后的结构模板。"
 }

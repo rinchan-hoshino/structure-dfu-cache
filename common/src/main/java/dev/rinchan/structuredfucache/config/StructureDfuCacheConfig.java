@@ -13,7 +13,7 @@ import org.slf4j.Logger;
 /**
  * Lightweight zero-dependency TOML configuration (config/structure_dfu_cache.toml).
  */
-public record StructureDfuCacheConfig(boolean enabled, int maxWorkers, boolean verboseLogging) {
+public record StructureDfuCacheConfig(boolean enabled, int maxWorkers, boolean verboseLogging, boolean notifyInChat) {
     public static final String FILE_NAME = "structure_dfu_cache.toml";
     public static final int MIN_WORKERS = 0;
     public static final int MAX_WORKERS = 8;
@@ -28,8 +28,12 @@ public record StructureDfuCacheConfig(boolean enabled, int maxWorkers, boolean v
         maxWorkers = clampWorkers(maxWorkers);
     }
 
+    public StructureDfuCacheConfig(boolean enabled, int maxWorkers, boolean verboseLogging) {
+        this(enabled, maxWorkers, verboseLogging, false);
+    }
+
     public static StructureDfuCacheConfig defaults() {
-        return new StructureDfuCacheConfig(true, 0, false);
+        return new StructureDfuCacheConfig(true, 0, false, false);
     }
 
     public static StructureDfuCacheConfig get() {
@@ -69,7 +73,8 @@ public record StructureDfuCacheConfig(boolean enabled, int maxWorkers, boolean v
             boolean enabled = readBoolean(parsed, "enabled", true);
             int maxWorkers = readInt(parsed, "maxWorkers", 0);
             boolean verboseLogging = readBoolean(parsed, "verboseLogging", false);
-            return new StructureDfuCacheConfig(enabled, maxWorkers, verboseLogging);
+            boolean notifyInChat = readBoolean(parsed, "notifyInChat", false);
+            return new StructureDfuCacheConfig(enabled, maxWorkers, verboseLogging, notifyInChat);
         } catch (IOException | RuntimeException exception) {
             LOGGER.warn("Unable to read {}: {}; using defaults.", file, exception.getMessage());
             return defaults();
@@ -104,7 +109,10 @@ public record StructureDfuCacheConfig(boolean enabled, int maxWorkers, boolean v
             + "# 1..8 = explicit worker cap.\n"
             + "maxWorkers = " + cfg.maxWorkers() + "\n\n"
             + "# When true, logs extra fingerprint and build diagnostics at INFO level.\n"
-            + "verboseLogging = " + cfg.verboseLogging() + "\n";
+            + "verboseLogging = " + cfg.verboseLogging() + "\n\n"
+            + "# When true, sends a single concise cache status notice in chat to joining ops / singleplayer host.\n"
+            + "# Defaults to false so chat stays completely quiet.\n"
+            + "notifyInChat = " + cfg.notifyInChat() + "\n";
     }
 
     private static boolean readBoolean(Map<String, Object> parsed, String key, boolean fallback) {
